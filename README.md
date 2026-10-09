@@ -1,0 +1,128 @@
+# OASIX
+
+OASIX ist eine hardwareunabhängige KI-Orchestrierungsplattform. Ihre dauerhaft
+verfügbare Control Plane stellt stabile Schnittstellen für interaktive
+LLM-Anfragen und asynchrone Jobs bereit, verwaltet den Arbeitszustand persistent
+und steuert einen bedarfsgesteuerten Compute Worker einschließlich Wake-up,
+Readiness und Sleep.
+
+Ziel ist eine klare technische Trennung von Orchestrierung und Rechenleistung.
+Worker-Hardware, Betriebssysteme, Modelle und Agent-Frameworks bleiben über
+externe Konfiguration, Worker-Profile und providerneutrale Adapter
+austauschbar. Ein Wechsel des Compute-Servers erfordert weder Änderungen am
+OASIX-Anwendungscode noch an stabilen Client-APIs.
+
+## Architekturüberblick
+
+```text
+Open WebUI und weitere Clients
+             |
+             | /v1/... und /api/v1/...
+             v
+Control Plane: API-Gateway, Persistenz, Dispatch,
+               Leases, Power-Steuerung und Telemetrie
+             |
+             | validierte Worker-Profile und Service-Endpunkte
+             v
+Compute Worker: LLM-Inferenz, Agenten und rechenintensive Tools
+```
+
+Die Control Plane entscheidet, orchestriert und speichert den Zustand. Queues,
+Jobs, Attempts, Leases, Control-State und zuordenbare Telemetrie überleben dort
+einen Neustart. Jobs und ihre einzelnen Ausführungsversuche sind getrennte
+Entitäten: Ein Job behält seine Identität, während jeder Retry einen neuen
+Attempt erzeugt.
+
+Der aktive Compute Worker führt KI-Inferenz, Agenten und rechenintensive Tools
+aus. Jobs werden erst übergeben, wenn der Worker und die jeweils benötigten
+Dienste bereit sind. Agent-Rollen wie Research, Dokumentation und Coding sind
+logische Fähigkeiten und nicht an ein bestimmtes Framework oder eine feste
+Prozessaufteilung gekoppelt.
+
+## Beispieldeployment
+
+Das aktuelle Deployment ist ein Beispiel und keine zwingende Voraussetzung
+für andere OASIX-Installationen:
+
+| Rolle und Beispielhost | Stack / Dienst | Aufgabe |
+| --- | --- | --- |
+| Control Plane – NAS mit Docker | `ai-oasix` | Eigenständige OASIX-Control-Plane mit API-Gateway, Persistenz, Dispatch, Lease Registry, Retry-/Sleep-Logik, Recovery und Telemetrie |
+| NAS mit Docker | Open WebUI | Eigenständiger Client-Dienst; bleibt vom OASIX-Stack getrennt |
+| Compute Worker – Ubuntu-Server mit Docker | `ai-llm` | Bestehender, eigenständiger LLM-Stack mit llama.cpp |
+| Compute Worker – Ubuntu-Server mit Docker | `ai-worker` | Geplanter, eigenständiger Stack für Agent-, Tool- und Worker-Runtime |
+
+Im Beispiel läuft die dauerhaft verfügbare Control Plane im Stack `ai-oasix`
+auf einem NAS mit Docker. Open WebUI bleibt dort ein eigenständiger Dienst. Ein
+Ubuntu-Server mit Docker ist der aktuelle, bedarfsgesteuerte Compute Worker und
+betreibt `ai-llm` sowie später `ai-worker`. Die Deployment-Einheiten bleiben
+getrennt; insbesondere sind `ai-oasix` und `ai-worker` unabhängig versionierbar
+und deploybar.
+
+Andere Hosts oder Betriebssysteme können über passende Worker-Profile und
+Adapter angebunden werden. Private Hostnamen, IP-Adressen, lokale DNS-Namen und
+konkrete Hardware sind keine Bestandteile der Architektur oder öffentlichen
+Schnittstellen.
+
+## Schnittstellen, Konfiguration und Sicherheit
+
+OpenAI-kompatible Client-Endpunkte bleiben unter `/v1/...` stabil. Management-
+und Job-Endpunkte liegen getrennt und versioniert unter `/api/v1/...`.
+Technische Rollen und IDs wie `control_plane`, `active_worker` und `worker_id`
+ersetzen installationsspezifische Bezeichnungen in Geschäftslogik,
+Datenmodell und API-Verträgen.
+
+Worker-Endpunkte, Authentifizierungsreferenzen, Wake-/Sleep-Methoden,
+Readiness-Probes, Services und Policies werden extern konfiguriert und beim
+Start vollständig validiert. Client- und Management-APIs erfordern
+Authentifizierung; administrative Power-Aktionen sind nicht mit einem
+unprivilegierten Inference-Key zulässig. Secrets stehen weder im Repository
+noch im Klartext in der Hauptkonfiguration, in Logs oder Fehlerantworten.
+
+## Worker-Lebenszyklus und Energiemanagement
+
+Ein zunächst unbekannter oder schlafender Worker wird bei Bedarf beispielsweise
+per Wake-on-LAN geweckt. OASIX wartet anschließend mit begrenztem Timeout auf
+die servicebezogene Readiness. Erst wenn Worker und benötigte Dienste bereit
+sind, wird eine Anfrage oder ein Job übergeben. Die Zustände des MVP sind
+`UNKNOWN`, `WAKING`, `READY`, `BUSY`, `IDLE`, `SLEEPING` und `UNAVAILABLE`.
+
+Die Lease Registry ist die einzige maßgebliche Quelle für aktive
+Worker-Nutzung. Jede LLM-Anfrage, Agent-Ausführung sowie Build-, Test- oder
+Development-Aktivität erhält eine Lease mit TTL beziehungsweise Heartbeat.
+Dadurch halten abgestürzte Clients oder Prozesse den Worker nicht dauerhaft
+wach.
+
+Automatischer Sleep ist nur erlaubt, wenn:
+
+- keine aktive Lease existiert,
+- keine unmittelbar ausführbare oder fällige Arbeit vorliegt,
+- das konfigurierte Idle-Timeout abgelaufen ist und
+- der Worker den Zustand `READY` oder `IDLE` hat.
+
+Manual Sleep wendet dieselben Schutzbedingungen an. Force Sleep pausiert neuen
+Dispatch, beachtet eine konfigurierbare Grace Period, protokolliert den Eingriff
+und markiert nicht sauber beendete Attempts als `INTERRUPTED`. Nach einem
+Neustart werden Worker-Zustand, aktive Attempts und Leases mit der Realität
+abgeglichen. Retry- und Wake-up-Versuche sind begrenzt und konfigurierbar.
+
+## Geplante MVP-Phasen
+
+| Phase | Ergebnis |
+| --- | --- |
+| A – Fundament | Validiertes Konfigurationsschema und Secret-Referenzen, persistente Datenbank, generischer Worker und strukturierte Logs |
+| B – LLM-Pfad | Health/Readiness, Wake-on-LAN, OpenAI-kompatibler Proxy mit Streaming sowie Wake- und Token-Telemetrie |
+| C – Job/Power | Persistente Jobs und getrennte Attempts, Retry, Leases mit TTL, Idle/Manual/Force Sleep und Recovery |
+| D – Agenten | Providerneutraler Agent-Adapter und erste Research-/Dokumentations-Runtime; Rollen werden konfiguriert |
+| E – Development-Schutz | Konfigurierbarer Activity-Probe beziehungsweise Lease für VS Code/SSH, damit aktive Entwicklung Automatic Sleep blockiert |
+
+Das Control-Plane-Fundament wird in der Aufbauphase ausnahmsweise lokal auf dem
+Mac entwickelt und getestet. Langfristig finden Worker-, Agent- und
+Coding-Arbeiten per VS Code Remote SSH direkt auf dem aktiven Compute Worker
+statt.
+
+## Verbindliche Grundlage
+
+Die vollständigen Architektur-, Sicherheits- und Akzeptanzanforderungen stehen
+im [OASIX Technical Requirement v3.4](docs/OASIX_Technical_Requirement_Reviewed_v3.4.docx).
+Es ist die einzige verbindliche Architekturgrundlage. Ergänzende Regeln für
+Änderungen in diesem Repository enthält [AGENTS.md](AGENTS.md).
