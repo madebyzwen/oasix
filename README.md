@@ -120,6 +120,15 @@ Mac entwickelt und getestet. Langfristig finden Worker-, Agent- und
 Coding-Arbeiten per VS Code Remote SSH direkt auf dem aktiven Compute Worker
 statt.
 
+## Linux-CI
+
+GitHub Actions prüft Pushes auf `main`, Pull Requests gegen `main` sowie manuell
+gestartete Läufe unter `ubuntu-latest` mit Python 3.12. Die Pipeline installiert
+das Projekt einschließlich Entwicklungsabhängigkeiten und führt die vollständige
+pytest-Suite, Ruff-Linting, den Ruff-Format-Check und einen Import-Smoke-Test aus.
+Sie verwendet weder Repository-Secrets noch selbst gehostete Runner und führt
+kein Deployment durch.
+
 ## Verbindliche Grundlage
 
 Die vollständigen Architektur-, Sicherheits- und Akzeptanzanforderungen stehen
