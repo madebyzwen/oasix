@@ -417,3 +417,33 @@ ausdrücklich noch nicht implementierte Entscheidungen.
   OBS-01, OBS-03, REC-04 und AC-10;
   [Phase A.3.2](phases/A3-logging.md),
   [Logging-Implementierung](../../src/oasix/logging/core.py)
+
+## OASIX-DEC-017 – Isolierter asynchroner HTTP-Readiness-Adapter
+
+- **Status:** In B.1 implementiert; unabhängige Review-Abnahme ausstehend
+- **Kontext:** Service-Readiness muss asynchron, servicebezogen und anhand der
+  extern validierten Worker-Konfiguration geprüft werden. Authentifizierung darf
+  nur aus aufgelösten Secret-Referenzen stammen; Redirects, Prozess-Proxies und
+  Transportdetails dürfen die Sicherheitsgrenze nicht umgehen.
+- **Gewählte Lösung:** Ein an den aktiven Worker gebundener Adapter implementiert
+  den vorhandenen `ServiceReadinessProbe` mit HTTPX. Er baut pro Dienst genau
+  die konfigurierte GET-/HEAD-Anfrage, injiziert Bearer- oder Header-Secrets erst
+  in das Request-Objekt, verwendet den konfigurierten Readiness-Timeout und
+  wertet ausschließlich den Statuscode aus. `follow_redirects=False` und
+  `trust_env=False` sind explizit gesetzt. Der Adapter besitzt einen
+  kontrollierten asynchronen Lebenszyklus für seinen Connection-Pool.
+- **Begründung:** HTTPX stellt einen nativen Async-Client, explizite Timeouts und
+  injizierbare Testtransporte bereit. Die geschlossene OASIX-Schicht verhindert,
+  dass Endpunkte, Providerfehler oder Credentials in öffentliche Fehler gelangen.
+- **Berücksichtigte Alternativen:** Ein eigener HTTP-/TLS-Client auf Basis von
+  `asyncio`, synchrone Requests in Threads, automatische Redirects und
+  Umgebungs-Proxies wurden wegen höherer Komplexität beziehungsweise
+  unkontrollierter Netzwerkziele verworfen.
+- **Konsequenzen und Trade-offs:** HTTPX ist eine neue Laufzeitabhängigkeit. Der
+  Besitzer muss den Adapter schließen. Ein unerwarteter HTTP-Status ist ein
+  bestätigtes `ready=False`; nur Timeout und technische Kommunikation werden zu
+  Exceptions. Der Adapter führt weder Wake-up noch Zustandsübergänge aus.
+- **Quellen:** Requirement CFG-02 bis CFG-05, WRK-03 bis WRK-05, SEC-02,
+  SEC-03 und AC-10; [Phase B.1](phases/B1-http-readiness.md),
+  [HTTPX Async Support](https://www.python-httpx.org/async/),
+  [HTTPX Environment Variables](https://www.python-httpx.org/environment_variables/)

@@ -23,6 +23,7 @@ Vorgaben konkreten Implementierungsphasen zu und unterscheiden dabei zwischen:
 - [Phase A.2 – Persistenzdesign](phases/A2-persistence.md)
 - [Phase A.3.1 – Generische Worker-Verträge](phases/A3-worker-contracts.md)
 - [Phase A.3.2 – Strukturiertes Logging](phases/A3-logging.md)
+- [Phase B.1 – HTTP-Service-Readiness](phases/B1-http-readiness.md)
 - [Vorlage für zukünftige Phasen](templates/phase-template.md)
 
 Das A.2-Design ist abgeschlossen. A.2.1 implementiert Runtime-Schema v2 und das
@@ -39,6 +40,12 @@ Readiness und vorbereitenden Wake-/Sleep-Ports sowie ein geschlossenes
 JSON-Lines-Loggingfundament. Produktive Worker-Kommunikation, Power-Ausführung,
 operative Readiness und weitere Orchestrierungslogik bleiben späteren Phasen
 vorbehalten; Phase A des Requirements ist damit nicht insgesamt abgeschlossen.
+
+B.1 implementiert den produktiven asynchronen HTTP-Readiness-Adapter für den
+konfigurierten aktiven Worker. Der Umfang ist lokal geprüft, aber bis zur
+unabhängigen Review-Abnahme noch nicht freigegeben. Wake-Orchestrierung,
+LLM-Proxy, Streaming und LLM-Telemetrie bleiben den folgenden B-Teilphasen
+vorbehalten.
 
 ## Pflegeregeln
 

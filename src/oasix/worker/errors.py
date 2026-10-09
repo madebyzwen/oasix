@@ -20,3 +20,9 @@ class WorkerTimeoutError(WorkerCommunicationError):
     """A worker operation exceeded its externally enforced time limit."""
 
     _safe_message = "Worker-Interaktion hat das zulässige Zeitlimit überschritten."
+
+
+class WorkerConfigurationError(WorkerInteractionError):
+    """Validated runtime data does not permit the requested worker operation."""
+
+    _safe_message = "Worker-Konfiguration erlaubt diese Interaktion nicht."

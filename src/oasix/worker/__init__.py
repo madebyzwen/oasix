@@ -14,8 +14,13 @@ from oasix.worker.contracts import (
 )
 from oasix.worker.errors import (
     WorkerCommunicationError,
+    WorkerConfigurationError,
     WorkerInteractionError,
     WorkerTimeoutError,
+)
+from oasix.worker.readiness import (
+    HttpServiceReadinessAdapter,
+    create_http_service_readiness_adapter,
 )
 from oasix.worker.resolution import ActiveWorkerTarget, resolve_active_worker
 
@@ -25,6 +30,8 @@ __all__ = [
     "ServiceReadinessObservation",
     "ServiceReadinessProbe",
     "WorkerCommunicationError",
+    "WorkerConfigurationError",
+    "HttpServiceReadinessAdapter",
     "WorkerId",
     "WorkerIdentity",
     "WorkerInteractionError",
@@ -34,5 +41,6 @@ __all__ = [
     "WorkerStateObserver",
     "WorkerTimeoutError",
     "WorkerWakeController",
+    "create_http_service_readiness_adapter",
     "resolve_active_worker",
 ]

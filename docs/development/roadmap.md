@@ -20,6 +20,7 @@ festgelegte Umfang implementiert und geprüft wurde.
 | A.2.3 – Persistenzzugriff und Integritätsnachweise | Abgeschlossen und unabhängig geprüft | Session-gebundene Repositories, zentrale typisierte Nutzdatenvalidierung, sichere Fehlerkategorien, lesender Revisionsschutz und die verbleibenden A.2-Integritätsnachweise sind implementiert und freigegeben. Nicht definierte Payload- und Referenzverträge werden geschlossen abgewiesen. | [Phase A.2](phases/A2-persistence.md#6-tests-und-nachweise), [Commit `c8f53b8`](https://github.com/madebyzwen/oasix/commit/c8f53b8b274bad3748aea48ad4172fb13dbfa60c), [Linux-CI](https://github.com/madebyzwen/oasix/actions/runs/37995302736/job/114039691204) |
 | A.3.1 – Generische Worker-Verträge | Abgeschlossen und unabhängig geprüft | Konfigurationsgebundene Worker-Auflösung, kanonische Worker-Zustände sowie getrennte asynchrone Verträge für Beobachtung, servicebezogene Readiness, Wake und Sleep sind implementiert und freigegeben. Produktive Adapter und Orchestrierungslogik sind nicht enthalten. | [Phase A.3.1](phases/A3-worker-contracts.md), [Commit `766af949`](https://github.com/madebyzwen/oasix/commit/766af94962cd6fc99c42fc9fe7e784acb00f92d9), [PR #5](https://github.com/madebyzwen/oasix/pull/5) |
 | A.3.2 – Strukturiertes Logging | Abgeschlossen und unabhängig geprüft | Isolierte JSON-Lines-Logger, statische Ereignisdefinitionen, zentrale Feld-Allowlist, Korrelationskennungen und sichere Fehlergrenzen sind implementiert und freigegeben. Operative Logaufrufe und externe Logging-Infrastruktur sind nicht enthalten. | [Phase A.3.2](phases/A3-logging.md), [Commit `647ca76`](https://github.com/madebyzwen/oasix/commit/647ca76eb9e0f881586a78d799def684ddbe7a84), [Linux-CI](https://github.com/madebyzwen/oasix/actions/runs/38000156438), [PR #5](https://github.com/madebyzwen/oasix/pull/5) |
+| B.1 – HTTP-Service-Readiness | Implementiert, Review ausstehend | Ein asynchroner HTTP-Adapter prüft GET-/HEAD-Readiness des aktiven Workers mit konfigurierten Statuscodes, Timeout und externer Authentifizierung. Redirects und Umgebungs-Proxies sind deaktiviert; Fehler bleiben transportneutral. | [Phase B.1](phases/B1-http-readiness.md) |
 
 Der festgelegte A.3-Umfang aus generischen Worker-Verträgen und strukturiertem
 Logging ist abgeschlossen und unabhängig geprüft. Phase A des Requirements ist
@@ -33,7 +34,7 @@ folgen in späteren Phasen.
 
 | Stufe | Status | Geplanter Requirement-Umfang |
 | --- | --- | --- |
-| B – LLM-Pfad | Geplant, nicht begonnen | Health/Readiness, Wake-on-LAN-Ausführung, OpenAI-kompatibler Proxy, Streaming sowie Wake- und Token-Telemetrie |
+| B – LLM-Pfad | B.1 implementiert; B.2 bis B.5 ausstehend | Health/Readiness, Wake-on-LAN-Ausführung, OpenAI-kompatibler Proxy, Streaming sowie Wake- und Token-Telemetrie |
 | C – Job/Power | Geplant, nicht begonnen | Persistente Jobs und Attempts, Retry-Ausführung, Leases mit TTL, Idle-/Manual-/Force-Sleep und Recovery |
 | D – Agenten | Geplant, nicht begonnen | Providerneutraler Agent-Adapter und erste Research-/Dokumentations-Runtime |
 | E – Development-Schutz | Geplant, nicht begonnen | Konfigurierbarer Activity-Probe beziehungsweise Lease für Remote-Development |
