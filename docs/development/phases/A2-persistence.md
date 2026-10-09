@@ -1,20 +1,27 @@
 # Phase A.2 – Datenbankdesign und Architekturplanung
 
-Status: **Design abgeschlossen – nicht implementiert**
+Status: **A.2 abgeschlossen – A.2.1 bis A.2.3 implementiert, unabhängig geprüft und freigegeben**
 
 ## 1. Ziel und Abgrenzung
 
-Phase A.2 plant eine lokale, transaktionale und migrationsfähige Persistenz für
-die OASIX-Control-Plane. Der vorgesehene Stack besteht aus Python 3.12, SQLite
-im WAL-Modus, SQLAlchemy 2, Alembic und pytest.
+Phase A.2 entwirft und implementiert schrittweise eine lokale, transaktionale
+und migrationsfähige Persistenz für die OASIX-Control-Plane. Der Stack besteht
+aus Python 3.12, SQLite im WAL-Modus, SQLAlchemy 2, Alembic und pytest.
 
 Dieses Dokument ist der finalisierte Entwurf nach abgeschlossenem
-Architektur-Review. Es wurden weder
-Anwendungscode noch Dependencies, Datenbankdateien oder Alembic-Migrationen
-angelegt. Die erste Migration ist auf sechs fachliche Kerntabellen begrenzt.
-Queue-Dispatch, Retry, Recovery, Lease-Ablauf und Power-Steuerung werden hier
-nur durch Persistenzverträge vorbereitet; ihre Geschäftslogik und vollständigen
-Zustandsautomaten folgen in späteren Phasen nach separater Freigabe.
+Architektur-Review. A.2.1 setzt Runtime-Schema v2, die sichere Pfadprüfung und
+das SQLAlchemy-/SQLite-Fundament um. A.2.2 ergänzt exakt sechs Fachtabellen und
+eine Alembic-Initialmigration. A.2.3 ergänzt Session-gebundene Repositories,
+zentrale Nutzdatenvalidierung, sichere Persistenzfehler und den lesenden
+Revisionsschutz. Queue-Dispatch, Retry, Recovery, Lease-Ablauf und
+Power-Steuerung werden hier nur durch Persistenzverträge vorbereitet; ihre
+Geschäftslogik und vollständigen Zustandsautomaten folgen in späteren Phasen.
+
+| Etappe | Status | Umfang |
+| --- | --- | --- |
+| A.2.1 | Abgeschlossen | Runtime-Version 2, Datenbankpfadprüfung, Engine, Pflicht-Pragmas, begrenzter Pool, Session- und Transaktionslebenszyklus |
+| A.2.2 | Abgeschlossen; unabhängig geprüft und freigegeben | Sechs SQLAlchemy-Kerntabellen, benannte Constraints und Indizes, Initialrevision `0001_a2_2` sowie Integritätsprüfungen |
+| A.2.3 | Abgeschlossen; unabhängig geprüft und freigegeben | Session-gebundene Repositories, zentrale Pydantic-Validierung, sichere Fehlerkategorien, Revisionsschutz und verbleibende A.2-Integritätsnachweise |
 
 ## 2. Verbindliche Anforderungen
 
@@ -47,8 +54,9 @@ verbleibende Geschäftsentscheidungen ausdrücklich als offen.
 
 ### 3.1 Komponenten und Verantwortungsgrenzen
 
-Geplant ist eine synchrone SQLAlchemy-2-Persistenzschicht innerhalb der Control
-Plane:
+Die synchrone SQLAlchemy-2-Persistenzschicht innerhalb der Control Plane ist
+bis einschließlich Engine, Session Factory, Transaktionskontext und
+grundlegenden Repositories umgesetzt. Fachliche Use Cases sind noch geplant:
 
 ```text
 API / Dispatcher / Recovery / Power-Steuerung
@@ -68,6 +76,10 @@ API / Dispatcher / Recovery / Power-Steuerung
 - Sessions sind kurzlebig und an einen Request beziehungsweise Use Case
   gebunden; es gibt keine globale Session.
 - Repositories kapseln SQL, rufen aber nie selbst `commit()` auf.
+- `PersistenceRepositories` erhält eine caller-eigene `Session`, prüft die
+  erwartete Revision lesend und stellt getrennte Zugriffe für alle sechs
+  Entitäten bereit. Lesezugriffe erzeugen keine Zeilen; `job_events` ist über
+  die normale Schnittstelle ausschließlich append-only.
 - Use-Case-Services besitzen die Transaktionsgrenze und committen oder rollen
   den gesamten fachlichen Zustandswechsel zurück.
 - Netzwerk-, Readiness-, Wake-/Sleep- und Agent-Aufrufe finden nie innerhalb
@@ -129,7 +141,7 @@ Die langfristigen Entscheidungen stehen knapp im
 [Entscheidungsregister](../decisions.md). Dieses Dokument enthält das konkrete
 Schema und die Betriebsverträge.
 
-Die erste Alembic-Migration erzeugt genau diese sechs fachlichen Tabellen:
+Die Initialrevision `0001_a2_2` erzeugt genau diese sechs fachlichen Tabellen:
 
 1. `jobs`
 2. `attempts`
@@ -140,7 +152,8 @@ Die erste Alembic-Migration erzeugt genau diese sechs fachlichen Tabellen:
 
 Alembics technische Tabelle `alembic_version` wird vom Migrationswerkzeug
 verwaltet und ist keine OASIX-Fachtabelle. Die Initialmigration legt außerdem
-die Singleton-Zeile in `control_state` an.
+die Singleton-Zeile in `control_state` an. Upgrade, Downgrade auf `base` und
+erneutes Upgrade sind implementiert und geprüft.
 
 Folgende fünf fachlichen Tabellen gehören ausdrücklich **nicht** zur ersten
 Migration und werden erst zusammen mit der jeweils verantwortlichen
@@ -169,8 +182,9 @@ Geschäftskomponente entworfen und migriert:
 - Statuswerte liegen als `VARCHAR` mit benannten `CHECK`-Constraints vor.
 - JSON liegt kanonisch UTF-8-codiert in `TEXT`. Die Anwendung prüft Schema,
   Verschachtelung und Byte-Limit vor dem Schreiben; die Migration ergänzt
-  `CHECK(json_valid(...))`. Die Engine-Initialisierung muss die benötigten
-  SQLite-JSON-Funktionen prüfen und bei deren Fehlen geschlossen fehlschlagen.
+  `CHECK(json_valid(...))`. Die Engine-Initialisierung prüft `json_valid` mit
+  gültiger und ungültiger Eingabe und schlägt bei fehlender oder fehlerhafter
+  Funktion geschlossen fehl.
 - Alle Foreign Keys und Constraints erhalten stabile Namen. Foreign Keys
   verwenden `ON DELETE RESTRICT`; ein späterer Retention-Use-Case löscht
   abhängige Zeilen bewusst und atomar.
@@ -193,7 +207,8 @@ Exceptions oder Logs aufnehmen.
 | `extra_metrics_json` | Höchstens 65.536 UTF-8-Bytes; valides JSON-Objekt mit höchstens acht Verschachtelungsebenen und validierten technischen Schlüsseln. Es ergänzt nur Metriken und darf keine Kernfelder, Nutzinhalte oder Secrets spiegeln. |
 | `job_events.metadata_json` | Höchstens 16.384 UTF-8-Bytes; valides JSON-Objekt aus einer Allowlist je `event_type`. Keine freien Objekt-Dumps, Payloads, Rohantworten, Referenz-Tokens oder Zugangsdaten. |
 
-Diese Regeln werden an der Service-/Repository-Grenze zentral durchgesetzt.
+Diese Regeln werden seit A.2.3 an der Repository-Grenze zentral durch
+`RepositoryValidation` durchgesetzt.
 JSON-Felder dürfen nur über typisierte, feldbeschränkte Modelle geschrieben
 werden; eine generische Secret-Heuristik gilt nicht als Sicherheitsgarantie.
 Sichere Validierungsfehler nennen Feld, Regel und Limit, aber weder den Wert
@@ -201,7 +216,14 @@ noch Auszüge daraus. Da SQLite deklarierte `VARCHAR`-Längen nicht erzwingt,
 spiegelt die Migration alle genannten Byte-Obergrenzen zusätzlich in benannten
 `CHECK(length(CAST(feld AS BLOB)) <= limit)`-Constraints. Typspezifische
 JSON-Schemata, Verschachtelung und Inhaltsverbote bleiben
-Anwendungsverantwortung.
+Anwendungsverantwortung. `PayloadSchemaRegistry` akzeptiert nur explizit
+registrierte, auch verschachtelt geschlossene Pydantic-Modelle mit
+`extra="forbid"`; unbekannte Job-/Eventtypen und ungeprüfte Objektfelder
+schlagen geschlossen fehl. Das Repository enthält noch keine fachlich
+freigegebenen Job- oder Eventtypen. Bis deren Feldverträge vorliegen, bleibt
+die Registry leer und entsprechende Schreibvorgänge werden kontrolliert
+abgewiesen. Dasselbe gilt für optionale `extra_metrics`, solange kein
+geschlossenes Metrikmodell bereitgestellt wird.
 
 Für `execution_ref` akzeptiert die Anwendung nur das ausdrücklich als
 nicht geheim deklarierte Referenzfeld eines Runtime-Adapters, keine URL und
@@ -209,6 +231,14 @@ kein Authentifizierungsfeld. Liefert ein Backend ausschließlich ein Token oder
 eine credential-haltige URL, muss der Adapter daraus außerhalb dieser Tabelle
 eine sichere Referenz bilden oder den Wert ablehnen. Eine Mustererkennung
 vermeintlicher Tokens wird nicht als Sicherheitskontrolle verwendet.
+
+`result_ref`, `execution_ref` und `continuation_ref` werden ohne einen
+feldspezifischen `NonSecretReferenceAdapter` abgewiesen. Ein registrierter
+Adapter muss den unveränderten, ausdrücklich nicht geheimen Wert bestätigen;
+die zentrale Schicht erzwingt zusätzlich Bytegrenzen und weist Userinfo,
+Query/Fragment sowie für `execution_ref` sämtliche URLs ab. Konkrete
+Result-/Runtime-/Continuation-Adapterverträge fehlen weiterhin und sind daher
+nicht freigeschaltet.
 
 Die SQLite-Datei enthält damit weiterhin potenziell sensible Nutzdaten. Datei,
 WAL, SHM, Snapshots und Backups unterliegen denselben Zugriffsregeln. Ergebnisse
@@ -485,8 +515,8 @@ Semantik der späteren Komponenten.
 
 ### 5.11 Runtime-Konfiguration `schema_version: 2`
 
-Der Datenbankpfad wird als neue, strikt validierte Sektion der externen
-Runtime-YAML geplant:
+Der Datenbankpfad ist als strikt validierte Sektion der externen Runtime-YAML
+implementiert:
 
 ```yaml
 schema_version: 2
@@ -504,15 +534,13 @@ Persistenzinvarianten und keine frei abschaltbaren Konfigurationsschalter.
 
 Behandlung alter Konfigurationen:
 
-- `schema_version: 1` behält unverändert seine heutige Bedeutung ohne
-  Persistenzsektion.
-- Ab der Persistenzimplementierung startet die vollständige Control Plane nur
-  mit Version 2. Version 1 wird mit einem sicheren, eindeutigen
-  Migrationshinweis abgewiesen; es gibt weder stillen Defaultpfad noch
-  automatische Umdeutung oder In-place-Migration der YAML-Datei.
+- `schema_version: 1` bleibt das historische Format ohne Persistenzsektion,
+  wird vom aktuellen Runtime-Loader aber nicht mehr akzeptiert.
+- Die persistenzfähige Control Plane startet nur mit Version 2. Version 1 wird
+  sicher abgewiesen; es gibt weder stillen Defaultpfad noch automatische
+  Umdeutung oder In-place-Migration der YAML-Datei.
 - Die manuelle Umstellung besteht aus dem expliziten Setzen von Version 2 und
-  dem Ergänzen der validierten `persistence`-Sektion. Bis A.2 implementiert ist,
-  bleibt der vorhandene Version-1-Code unverändert.
+  dem Ergänzen der validierten `persistence`-Sektion.
 - Bootstrap bleibt ausschließlich für `OASIX_CONFIG_FILE` und
   `OASIX_SECRETS_DIRECTORY` zuständig. Es entsteht keine weitere
   `OASIX_`-Umgebungsvariable und keine zweite Quelle für den DB-Pfad.
@@ -526,15 +554,24 @@ Dateisystem- und Berechtigungsvertrag:
 - Der Control-Plane-Prozess benötigt ausschließlich dort Rechte für Datenbank,
   `-wal` und `-shm`. Für Linux-Produktion sind ein dedizierter Owner,
   Verzeichnismodus `0700`, Dateimodus `0600` und `umask 0077` vorgesehen.
-- Pfad, Typ, Schreibbarkeit, freie Anlage der Begleitdateien und soweit
-  zuverlässig erkennbar der lokale Dateisystemtyp werden vor Bereitstellung
-  der Runtime geprüft. Nicht sicher prüfbare Mount-Eigenschaften bleiben eine
-  dokumentierte Deployment-Voraussetzung und dürfen nicht als garantiert
-  dargestellt werden. Fehlerausgaben geben nicht den vollständigen
-  installationsspezifischen Pfad wieder.
-
-Die exakte Pydantic-v2-Modellierung, sichere Dateiöffnung und Plattformtests
-sind Implementierungsgegenstand einer späteren Freigabe.
+- Die A.2.1-Pfadprüfung öffnet das kanonische Elternverzeichnis mit einem
+  Descriptor, prüft Owner und Modus, führt darin einen Schreibtest aus und
+  reserviert beziehungsweise öffnet das Datenbankziel relativ zu diesem
+  Descriptor mit `O_NOFOLLOW`, soweit die Plattform dieses Flag anbietet.
+  Typ, Berechtigungen und Device-/Inode-Identität des geöffneten Objekts werden
+  geprüft. Fehlerausgaben geben den vollständigen installationsspezifischen
+  Pfad nicht wieder.
+- Ob das Volume tatsächlich lokal, persistent und für SQLite-WAL geeignet ist,
+  lässt sich unter Linux und macOS nicht vollständig portabel aus Python
+  nachweisen. Diese Eigenschaft bleibt eine dokumentierte
+  Deployment-Voraussetzung.
+- Python/SQLite bietet der Engine Factory keinen portablen Weg, den bereits
+  geprüften Dateidescriptor direkt als Datenbank zu übernehmen. Zwischen dem
+  Schließen des Prüfdescriptors und dem SQLite-Öffnen bleibt daher trotz
+  Device-/Inode-Prüfung vor und nach dem Verbindungsaufbau ein Restrisiko
+  gegenüber einem bösartigen Prozess mit derselben Benutzer-ID. Das
+  Datenbankverzeichnis muss exklusiv dem Control-Plane-Konto gehören und darf
+  für andere Prozesse nicht schreibbar sein.
 
 ### 5.12 Idempotenzvertrag
 
@@ -574,10 +611,11 @@ bis dahin darf keine automatische Löschung implementiert werden.
 
 ### 5.13 Engine, Sessions und SQLite-Pragmas
 
-Die geplante Factory akzeptiert nur den bereits validierten Pfad und baut die
+Die in A.2.1 implementierte Factory akzeptiert nur die validierte
+Runtime-Konfiguration und die Bootstrap-Quellen, prüft den Pfad und baut die
 SQLite-URL intern. Beliebige Datenbank-URLs werden nicht übernommen.
 
-Geplante Verbindungsinitialisierung:
+Implementierte Verbindungsinitialisierung:
 
 - Python-3.12-`sqlite3` mit `autocommit=False`, damit nicht der legacyhafte
   Transaktionsmodus die Semantik bestimmt;
@@ -590,6 +628,8 @@ Geplante Verbindungsinitialisierung:
 - `PRAGMA busy_timeout=5000` auf jeder Verbindung, sofern die validierte
   Runtime-Konfiguration keinen ausdrücklich anderen positiven Wert vorgibt;
 - `PRAGMA synchronous=FULL` als sicherheitsorientierter MVP-Default;
+- verifiziertes SQLite-`json_valid` als Voraussetzung für die JSON-
+  Datenbankconstraints;
 - SQLAlchemy-`QueuePool` mit `pool_size=5`, `max_overflow=0` und
   `pool_timeout=5` Sekunden als einfache, begrenzte Ausgangskonfiguration.
 
@@ -597,9 +637,13 @@ Unbekannte oder nicht wirksame Pragmas werden nicht stillschweigend akzeptiert.
 Die Session Factory verwendet SQLAlchemy-2-Stil und `expire_on_commit=False`.
 Normale A.2-Transaktionstests verwenden `Session.begin()`. Eine spätere
 `BEGIN IMMEDIATE`-Primitive für den Queue-Claim gehört zum Dispatcher und wird
-nicht in A.2 vorweggenommen. A.2 übersetzt ein nach Ablauf des Busy-Timeouts
-verbleibendes `SQLITE_BUSY` in einen sicheren operativen Persistenzfehler;
-DB-Lock-Retry und fachlicher Job-Retry werden erst mit ihren Use Cases geplant.
+nicht in A.2.1 vorweggenommen. Die Initialisierung übersetzt Verbindungs- und
+Pfadfehler in sichere technische Fehlertypen. Seit A.2.3 übersetzen auch die
+Session-/Transaktionsgrenzen Verbindungs-, Integritäts- und Operationsfehler.
+Ein nach Ablauf des Busy-Timeouts verbleibendes `SQLITE_BUSY` oder
+`SQLITE_LOCKED` wird ohne SQL-Parameter und ohne automatischen Retry als
+`PersistenceLockingError` gemeldet. Fachlicher Job-Retry bleibt
+unimplementiert.
 
 Diese Werte sind bewusst konservative Startannahmen für eine einzelne Control
 Plane und kein adaptiver Tuning-Mechanismus. Der kleine Pool begrenzt offene
@@ -610,6 +654,10 @@ Erkennung aller Netzwerk- oder speziellen Dateisysteme ist jedoch nicht
 plattformübergreifend garantiert. Das Deployment muss deshalb zusätzlich ein
 lokales persistentes Volume attestieren. Abweichungen von Pool- oder Timeout-
 Werten erfordern Messdaten, aber keinen neuen Architekturmechanismus.
+
+Die Engine setzt `hide_parameters=True`; dadurch erscheinen gebundene
+SQL-Parameter nicht in SQLAlchemy-Fehlertexten. Es gibt keine globale Session,
+keine Schemaerzeugung beim Import und keinen automatischen Migrationslauf.
 
 ### 5.14 Transaktionsgrenzen
 
@@ -641,6 +689,23 @@ Die Initialmigration erstellt die sechs fachlichen Tabellen, benannten
 Constraints, Indizes und die `control_state`-Singleton-Zeile. Das
 Produktionsschema wird nicht über `Base.metadata.create_all()` erzeugt.
 
+Migrationen werden ausschließlich als separate Wartungsoperation ausgeführt.
+Bei gesetzten Bootstrap-Quellen lautet der tatsächliche Aufruf:
+
+```bash
+OASIX_CONFIG_FILE=/path/provided-by-deployment/oasix.yaml \
+OASIX_SECRETS_DIRECTORY=/path/provided-by-deployment/secrets \
+python -m alembic -c alembic.ini upgrade head
+```
+
+Die Alembic-Konfiguration enthält bewusst keine zweite Datenbank-URL. `env.py`
+lädt die validierte Runtime-Konfiguration und verwendet die A.2.1-Engine samt
+Pfad-, Berechtigungs- und PRAGMA-Prüfungen. Erwarteter und einziger Head ist
+`0001_a2_2`. Nach jeder Upgrade- oder Downgrade-Operation werden
+`foreign_key_check` und `integrity_check` ausgeführt. `downgrade base` ist für
+Tests und kontrollierte Wartung verfügbar, aber kein Ersatz für das unten
+beschriebene Produktions-Restore-Verfahren.
+
 - Es gibt zunächst genau einen linearen Alembic-Head.
 - Autogenerate ist nur Entwurfswerkzeug; jede Migration wird manuell auf
   Constraints, Indizes, Datenmigration und Downtime geprüft.
@@ -656,6 +721,12 @@ Produktionsschema wird nicht über `Base.metadata.create_all()` erzeugt.
   `integrity_check` und Schema-Smoke-Test.
 - Die Anwendung schlägt geschlossen fehl, wenn DB-Revision und erwarteter Head
   nicht übereinstimmen.
+- A.2.3 stellt dafür `verify_schema_revision()` bereit. Die Prüfung liest nur
+  `alembic_version`, migriert nicht, erzeugt keine Tabellen und lehnt fehlende,
+  veraltete, unbekannte oder mehrdeutige Revisionen ab. Das
+  `PersistenceRepositories`-Aggregat führt diese Prüfung vor Freigabe
+  fachlicher Zugriffe aus; die vollständige Startup-/Recovery-Orchestrierung
+  bleibt späteren Phasen vorbehalten.
 - Downgrades werden entwickelt und getestet, sind aber keine garantierte
   Produktionsrollback-Strategie. Nicht sicher reversible Änderungen erfordern
   Restore von Anwendungsversion und Backup.
@@ -718,11 +789,63 @@ Offsite-Ablage und numerische Backup-Retention bleiben offene Betriebsfragen.
 
 ## 6. Tests und Nachweise
 
-In diesem Designschritt werden keine Persistenztests implementiert und keine
-SQLite-Datei erzeugt. Die Implementierung trennt ihre Nachweise verbindlich
-nach dem tatsächlichen Phasenumfang.
+Die A.2.1- bis A.2.3-Tests verwenden ausschließlich temporäre lokale
+Datenbanken und benötigen weder Netzwerkzugriffe noch reale Secret-Dateien.
 
-### A.2 – verpflichtend
+### A.2.1 – implementiert und lokal nachgewiesen
+
+- Runtime-Version 2 einschließlich Pflichtfeldern, unbekannten Feldern,
+  Timeout-Grenzen und sicherer Ablehnung von Version 1,
+- absoluter Datenbankpfad, existierender kanonischer Elternpfad, Trennung von
+  der Secret-Quelle, Symlink-/Dateityp-, Owner-, Modus- und Schreibprüfung,
+- WAL, Foreign Keys auf getrennten Verbindungen, `synchronous=FULL`,
+  konfigurierter Busy-Timeout und begrenzte Poolparameter,
+- explizites DBAPI-`autocommit=False` sowie Setzen von Foreign Keys außerhalb
+  einer aktiven DBAPI-Transaktion,
+- Session-Commit, Rollback, Ressourcenfreigabe und erneute Initialisierung mit
+  persistenten Testdaten,
+- keine automatische Anlage eines Anwendungsschemas sowie Redaktion privater
+  Pfade und gebundener SQL-Parameter in Fehlerrepräsentationen.
+
+### A.2.2 – implementiert und unabhängig geprüft
+
+- exakt sechs deklarative SQLAlchemy-Modelle und eine gemeinsame
+  `Base.metadata`, einschließlich dokumentierter Beziehungen und
+  Nullability-Regeln,
+- explizit benannte Primär-/Fremdschlüssel, Unique- und CHECK-Constraints sowie
+  normale und partielle SQLite-Indizes,
+- Upgrade einer leeren Dateidatenbank auf den einzigen Head `0001_a2_2`,
+  unveränderter zweiter Upgrade-Aufruf, Downgrade auf `base` und erneutes
+  Upgrade,
+- exakt eine initiale `control_state`-Zeile mit `PAUSED_RECOVERY`, `REQUIRED`,
+  leerer Prozessinstanz und Version 1,
+- erfolgreiche und abgewiesene Schreibvorgänge für Foreign Keys, Statuswerte,
+  Versionen, Zeitreihenfolgen, Idempotenz, offene Attempts, Leases, JSON und
+  alle dokumentierten UTF-8-Byte-Limits,
+- Persistenz nach Engine-Neuerzeugung und Lesen aus einem separaten Subprozess,
+  atomarer Rollback zusammengehöriger Inserts sowie Foreign Keys auf getrennten
+  Verbindungen,
+- `foreign_key_check`, `integrity_check`, Revisionsprüfung, sichere
+  SQL-Parameterdarstellung und Fail-Closed-Test bei fehlendem `json_valid`.
+
+### A.2.3 – implementiert und unabhängig geprüft
+
+- Session-gebundene Repositories für alle sechs Entitäten, Lesezugriffe ohne
+  Seiteneffekte, caller-eigene Transaktionen und append-only Eventzugriff,
+- atomare Mehr-Repository-Transaktionen, vollständiger Rollback sowie
+  vorab geprüfte Job-/Attempt-Korrelation für Events und Leases,
+- kanonische UUIDv4, Status-/Identifier-/Zeit-/Dauervalidierung, deterministische
+  JSON-Objekte, alle UTF-8-Bytegrenzen und maximal acht Metrikebenen,
+- explizite, geschlossene Job-/Event-/Metrikschema-Verträge und kontrollierte
+  Ablehnung unbekannter oder noch nicht definierter Typen,
+- feldspezifische, standardmäßig geschlossene Referenzadapter sowie
+  redigierte Validierungs-, Integritäts-, Verbindungs- und Lockingfehler,
+- lesende Prüfung des einzigen kompatiblen Alembic-Heads sowie Ablehnung
+  fehlender, veralteter und unbekannter Revisionen vor Repository-Schreibzugriff,
+- tatsächlicher Lock-Konflikt über getrennte SQLite-Verbindungen sowie erneute
+  Integritäts-, Foreign-Key- und Engine-Neustartnachweise.
+
+### Gesamtabnahme A.2 – verpflichtend
 
 - **Runtime-Konfiguration Version 2:** gültige Version-2-Konfiguration,
   ausdrückliche Ablehnung von Version 1 für die persistenzfähige Control Plane,
@@ -755,6 +878,12 @@ mehrere Verbindungen erforderlich sind, werden tatsächlich getrennte
 Verbindungen verwendet; eine einzelne In-Memory-Verbindung belegt weder
 Poolverhalten noch Persistenz.
 
+Die Datenbankconstraints für JSON-Syntax und Byte-Limits stammen aus A.2.2;
+A.2.3 ergänzt die davorliegende typisierte Anwendungskontrolle. Konkrete
+fachliche Payload-, Event-, Metrik- und Referenzadapterverträge sind bewusst
+nicht erfunden worden. Bis zu ihrer Freigabe werden die betroffenen Werte
+geschlossen abgewiesen.
+
 ### Spätere Phasen
 
 - Job-Claiming und Dispatcher einschließlich `BEGIN IMMEDIATE` und Konkurrenz,
@@ -774,6 +903,11 @@ Poolverhalten noch Persistenz.
 - Lange Reader können WAL-Checkpoints verzögern und die WAL-Datei wachsen
   lassen; Monitoring und ein Checkpoint-Betriebsplan sind nötig.
 - WAL ist für Netzwerkdateisysteme ungeeignet und bietet keine eingebaute HA.
+- Lokaler gegenüber Netzwerk-Storage wird nicht automatisch verlässlich
+  erkannt. Zudem kann ein Prozess mit derselben Benutzer-ID theoretisch das
+  Datenbankziel im verbleibenden Übergang zwischen Pfadprüfung und
+  SQLite-Öffnung austauschen; exklusive Verzeichnisrechte sind deshalb Teil des
+  Sicherheitsvertrags.
 - SQLite-Batch-Migrationen kopieren Tabellen und benötigen Platz sowie ein
   exklusives Wartungsfenster.
 - Lease-TTL basiert nach Neustart auf der UTC-Wanduhr. Zeitsynchronisation und
@@ -787,7 +921,7 @@ Poolverhalten noch Persistenz.
 - Ein SQLAlchemy-Abstraktionslayer garantiert keine verlustfreie spätere
   Migration zu PostgreSQL.
 
-### Vor A.2-Implementierung zu entscheiden – im Review entschieden
+### Vor A.2.1 zu entscheiden – im Review entschieden und umgesetzt
 
 Das abgeschlossene Review hat die unmittelbar blockierenden Punkte entschieden;
 sie gelten als verbindliche, möglichst einfache Implementierungsannahmen:
@@ -806,13 +940,12 @@ sie gelten als verbindliche, möglichst einfache Implementierungsannahmen:
    pool_timeout=5)`; keine adaptive Poolsteuerung und keine unbegrenzte
    Verbindungsanlage.
 
-Damit ist keine weitere Architekturentscheidung vor Beginn der A.2-
-Implementierung offen. Die Implementierung muss jedoch nachweisen, welche
-Pfad-, Symlink-, POSIX-Modus- und Dateisystemprüfungen unter Linux und macOS
-tatsächlich zuverlässig verfügbar sind. Nicht portabel nachweisbare
-Mount-Eigenschaften bleiben als explizite Deployment-Voraussetzung dokumentiert;
-eine vollständige plattformübergreifende Netzdateisystemerkennung wird nicht
-behauptet.
+Diese Vorgaben sind für das A.2.1-Fundament umgesetzt. Pfad-, Symlink-,
+POSIX-Modus- und Dateitypprüfungen werden unter Linux und macOS mit den dort
+verfügbaren Descriptoroperationen ausgeführt. Nicht portabel nachweisbare
+Mount-Eigenschaften bleiben als explizite Deployment-Voraussetzung
+dokumentiert; eine vollständige plattformübergreifende
+Netzdateisystemerkennung wird nicht behauptet.
 
 ### Für spätere Phasen zurückgestellt
 
@@ -836,16 +969,22 @@ zugehörigen fachlichen Verträgen.
 
 ## 8. Abnahmestatus
 
-Der Architektur-Review ist abgeschlossen und der A.2-Entwurf ist
-**designseitig freigegeben**. Die Persistenz ist weiterhin nicht implementiert;
-dieses Dokument ist keine eigenständige Beauftragung für Anwendungscode.
+Der Architektur-Review und die unabhängige Integrationsabnahme sind
+abgeschlossen. A.2.1 bis A.2.3 sind implementiert, geprüft und freigegeben;
+damit ist der definierte Implementierungsumfang von Phase A.2 abgeschlossen.
 
-Es gibt keine Aussage über funktionierende Persistenz, Migrationen, Recovery
-oder Produktionsreife. Anwendungscode, Dependencies, Tests, Initialmigration
-und Datenbankdateien folgen ausschließlich nach separater Freigabe.
+Das vorhandene Fundament belegt Konfigurations-, Verbindungs-, Schema-,
+Migrations-, Repository- und Datenbankintegritätseigenschaften, aber noch keine
+fachlichen Transitionen, Recovery oder Produktionsreife.
 
 ## 9. GitHub-Referenzen
 
 - Design-Pull-Request:
   [PR #3 – docs: design A2 persistence architecture](https://github.com/madebyzwen/oasix/pull/3)
-- Implementierungs-Commits und Persistenz-CI-Läufe: noch keine
+- A.2.1-Implementierungs-Commit: `cba7be6`
+- A.2.2: [Commit `09ea7f3`](https://github.com/madebyzwen/oasix/commit/09ea7f33347bc2763cae71ba8af5f8802288267b),
+  [erfolgreicher Linux-CI-Lauf](https://github.com/madebyzwen/oasix/actions/runs/37993363281/job/114032986707)
+- A.2.3: [Commit `c8f53b8`](https://github.com/madebyzwen/oasix/commit/c8f53b8b274bad3748aea48ad4172fb13dbfa60c),
+  [erfolgreicher Linux-CI-Lauf](https://github.com/madebyzwen/oasix/actions/runs/37995302736/job/114039691204)
+- Implementierungs-Pull-Request:
+  [PR #4 – feat(persistence): complete A.2 SQLite persistence foundation](https://github.com/madebyzwen/oasix/pull/4)

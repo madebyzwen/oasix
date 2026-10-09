@@ -190,3 +190,57 @@ bereits geöffnete Datei. Das Secret-Verzeichnis und seine Dateien müssen daher
 für die Control Plane und nicht vertrauenswürdige Prozesse unveränderlich sein
 und sollen im Deployment read-only mit restriktiven Berechtigungen
 bereitgestellt werden.
+
+## SQLite-Persistenzfundament
+
+Die persistenzfähige Control Plane verwendet ausschließlich Runtime-
+`schema_version: 2`. Diese Version ergänzt `persistence.database_path` als
+absoluten, extern vorgegebenen Dateipfad und den positiven, auf höchstens
+60.000 ms begrenzten `persistence.busy_timeout_ms` mit 5.000 ms als Default.
+Version 1 wird nicht automatisch aufgewertet. Der Datenbankpfad ist keine
+Bootstrap-Variable und wird intern erst nach vollständiger Konfigurations- und
+Secret-Validierung verwendet:
+
+```python
+from oasix.config import load_startup_configuration
+from oasix.persistence import PersistenceRepositories, initialize_persistence
+
+configuration = load_startup_configuration()
+with initialize_persistence(
+    configuration.runtime,
+    configuration.bootstrap,
+) as database:
+    with database.transaction() as session:
+        repositories = PersistenceRepositories(session)
+```
+
+Repositories verwenden ausschließlich die von außen bereitgestellte Session
+und führen selbst weder `commit()` noch `rollback()` aus. Das Aggregat prüft
+vor fachlichen Zugriffen lesend die erwartete Alembic-Revision. Seine leere
+Standard-Registry weist Job-/Event-Payloads, Zusatzmetriken und nicht leere
+Result-/Execution-/Continuation-Referenzen geschlossen ab. Spätere Komponenten
+müssen dafür explizite, geschlossene Pydantic-Schemata beziehungsweise
+feldspezifische, nicht geheime Adapterverträge bereitstellen; A.2.3 erfindet
+keine fachlichen Formate vorzeitig.
+
+Die Initialisierung reserviert beziehungsweise prüft eine reguläre
+Datenbankdatei descriptorbasiert, lehnt Symlink-Ziele und Pfade innerhalb der
+Secret-Quelle ab und verlangt für das eigene Datenbankverzeichnis Modus `0700`
+sowie für eine vorhandene Datenbankdatei Modus `0600`. SQLite wird mit WAL,
+Foreign Keys, `synchronous=FULL`, dem konfigurierten Busy-Timeout und einem auf
+fünf Verbindungen ohne Overflow begrenzten Pool geöffnet. Pflicht-Pragmas
+werden auf jeder neuen Verbindung gesetzt und zurückgelesen; SQL-Parameter
+werden in SQLAlchemy-Fehlerdarstellungen verborgen.
+
+SQLite-WAL setzt ein lokales persistentes Dateisystem voraus. Eine verlässliche
+plattformübergreifende Erkennung von Netzwerk- oder Spezialdateisystemen ist
+nicht implementiert und bleibt Deployment-Verantwortung. Zwischen der
+descriptorbasierten Reservierung und dem Öffnen durch SQLite verbleibt außerdem
+ein nicht vollständig schließbares Zeitfenster gegenüber einem bösartigen
+Prozess mit derselben Benutzer-ID. Datenbankverzeichnis und Prozesskonto müssen
+daher exklusiv kontrolliert werden. Die normale Runtime-Initialisierung legt
+weiterhin keine Fachtabellen an und führt weder `create_all()` noch Migrationen
+automatisch aus. Das versionierte A.2.2-Schema wird als separate
+Wartungsoperation mit `python -m alembic -c alembic.ini upgrade head`
+installiert; Alembic bezieht Datenbank- und Secret-Quelle dabei aus denselben
+validierten Bootstrap- und Runtime-Einstellungen wie die Anwendung.
