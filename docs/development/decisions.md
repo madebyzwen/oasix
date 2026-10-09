@@ -489,9 +489,10 @@ ausdrücklich noch nicht implementierte Entscheidungen.
 - **Gewählte Lösung:** Ein sessiongebundener `LeaseLifecycle` verwendet die vom
   Aufrufer kontrollierte kurze Transaktion. Acquire erzeugt eine UUIDv4 oder
   akzeptiert eine bereits vor der Operation stabilisierte UUIDv4 als
-  Idempotenzschlüssel. Wiederholung ist nur bei derselben Lease-Identität,
-  gleicher ursprünglicher TTL und noch aktiver Zeile erfolgreich. Renew
-  aktualisiert mit einem atomaren
+  Idempotenzschlüssel. Wiederholung ist nur bei derselben unveränderlichen
+  Lease-Identität und noch aktiver Zeile erfolgreich. Diese Identität umfasst
+  Worker, Owner, Purpose und optionale Job-/Attempt-Bezüge, nicht die
+  veränderliche Ablaufzeit. Renew aktualisiert mit einem atomaren
   SQL-Prädikat nur nicht freigegebene und noch nicht abgelaufene Leases, bewegt
   den Heartbeat nicht rückwärts und verkürzt das Ablaufdatum nicht. Release
   bewahrt bei Wiederholung die erste Freigabe. Aktivität ist ausschließlich
@@ -508,7 +509,11 @@ ausdrücklich noch nicht implementierte Entscheidungen.
 - **Konsequenzen und Trade-offs:** TTLs sind positive ganze Sekunden und werden
   über eine injizierbare UTC-Uhr als Epoch-Mikrosekunden persistiert. Owner,
   Purpose und Release-Grund sind generische technische IDs und dürfen keine
-  Secrets oder Freitext-Payloads enthalten. SQLite bleibt Single-Writer;
+  Secrets oder Freitext-Payloads enthalten. Die ursprüngliche TTL ist nach
+  Renew nicht aus `created_at` und `expires_at` rekonstruierbar, weil
+  `expires_at` veränderlich ist. Wiederholtes Acquire prüft sie daher nicht und
+  verändert die bestehende Gültigkeit nicht; eine Verlängerung erfordert
+  Renew. SQLite bleibt Single-Writer;
   konkurrierende Operationen können nach dem Busy-Timeout sicher scheitern und
   müssen als vollständige kurze Transaktion mit derselben Lease-ID wiederholt
   werden. Verwaiste Leases werden durch Ablauf inaktiv, ihre spätere Bereinigung

@@ -130,7 +130,7 @@ def test_acquire_rejects_invalid_owner_and_purpose(
             ).acquire(**arguments)
 
 
-def test_repeated_acquire_is_idempotent_only_for_same_active_identity(
+def test_repeated_acquire_is_idempotent_before_and_after_renew(
     migrated_database: PersistenceDatabase,
 ) -> None:
     _prepare_workers(migrated_database, WORKER_ID)
@@ -156,31 +156,97 @@ def test_repeated_acquire_is_idempotent_only_for_same_active_identity(
         assert repeated.created_at == first.created_at
         assert repeated.expires_at == first.expires_at
 
-    with pytest.raises(LeaseConflictError):
-        with migrated_database.transaction() as session:
-            LeaseLifecycle(
-                PersistenceRepositories(session).leases,
-                clock=_clock(1),
-            ).acquire(
-                lease_id=LEASE_ID,
-                worker_id=WORKER_ID,
-                owner="different-owner",
-                purpose="inference",
-                ttl_seconds=30,
-            )
+    with migrated_database.transaction() as session:
+        renewed = LeaseLifecycle(
+            PersistenceRepositories(session).leases,
+            clock=_clock(10),
+        ).renew(lease_id=LEASE_ID, ttl_seconds=60)
+        renewed_expiry = renewed.expires_at
 
+    with migrated_database.transaction() as session:
+        repeated_after_renew = LeaseLifecycle(
+            PersistenceRepositories(session).leases,
+            clock=_clock(11),
+        ).acquire(
+            lease_id=LEASE_ID,
+            worker_id=WORKER_ID,
+            owner="control-plane",
+            purpose="inference",
+            ttl_seconds=30,
+        )
+        assert repeated_after_renew.last_heartbeat_at == renewed.last_heartbeat_at
+        assert repeated_after_renew.expires_at == renewed_expiry
+
+
+def test_repeated_acquire_does_not_treat_ttl_as_persisted_identity(
+    migrated_database: PersistenceDatabase,
+) -> None:
+    _prepare_workers(migrated_database, WORKER_ID)
+    with migrated_database.transaction() as session:
+        original = LeaseLifecycle(
+            PersistenceRepositories(session).leases,
+            clock=_clock(0),
+        ).acquire(
+            lease_id=LEASE_ID,
+            worker_id=WORKER_ID,
+            owner="control-plane",
+            purpose="inference",
+            ttl_seconds=30,
+        )
+        original_expiry = original.expires_at
+
+    with migrated_database.transaction() as session:
+        repeated = LeaseLifecycle(
+            PersistenceRepositories(session).leases,
+            clock=_clock(1),
+        ).acquire(
+            lease_id=LEASE_ID,
+            worker_id=WORKER_ID,
+            owner="control-plane",
+            purpose="inference",
+            ttl_seconds=60,
+        )
+        assert repeated.expires_at == original_expiry
+
+
+@pytest.mark.parametrize(
+    ("field_name", "conflicting_value"),
+    [("owner", "different-owner"), ("purpose", "development")],
+)
+def test_repeated_acquire_rejects_changed_immutable_identity(
+    migrated_database: PersistenceDatabase,
+    field_name: str,
+    conflicting_value: str,
+) -> None:
+    _prepare_workers(migrated_database, WORKER_ID)
+    with migrated_database.transaction() as session:
+        LeaseLifecycle(PersistenceRepositories(session).leases, clock=_clock(0)).acquire(
+            lease_id=LEASE_ID,
+            worker_id=WORKER_ID,
+            owner="control-plane",
+            purpose="inference",
+            ttl_seconds=30,
+        )
+    with migrated_database.transaction() as session:
+        LeaseLifecycle(
+            PersistenceRepositories(session).leases,
+            clock=_clock(10),
+        ).renew(lease_id=LEASE_ID, ttl_seconds=60)
+
+    arguments = {
+        "lease_id": LEASE_ID,
+        "worker_id": WORKER_ID,
+        "owner": "control-plane",
+        "purpose": "inference",
+        "ttl_seconds": 30,
+    }
+    arguments[field_name] = conflicting_value
     with pytest.raises(LeaseConflictError):
         with migrated_database.transaction() as session:
             LeaseLifecycle(
                 PersistenceRepositories(session).leases,
-                clock=_clock(1),
-            ).acquire(
-                lease_id=LEASE_ID,
-                worker_id=WORKER_ID,
-                owner="control-plane",
-                purpose="inference",
-                ttl_seconds=60,
-            )
+                clock=_clock(11),
+            ).acquire(**arguments)
 
 
 def test_renew_extends_active_lease_and_never_shortens_expiry(

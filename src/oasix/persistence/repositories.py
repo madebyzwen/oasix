@@ -154,8 +154,8 @@ class LeasesRepository(_Repository):
             raise LeaseNotFoundError("Lease konnte nicht sicher gelesen werden.")
         if result.rowcount == 1:
             return entity
-        if not _same_lease_contract(entity, values):
-            raise LeaseConflictError("Lease-Vertrag steht in Konflikt mit dem Bestand.")
+        if not _same_lease_identity(entity, values):
+            raise LeaseConflictError("Lease-Identität steht in Konflikt mit dem Bestand.")
         if entity.created_at > observation["observed_at"]:
             raise LeaseConflictError("Lease-Zeitbasis steht in Konflikt mit dem Bestand.")
         if entity.released_at is not None or entity.expires_at <= observation["observed_at"]:
@@ -346,11 +346,8 @@ def _integrity_failure(field_name: str, rule: str) -> None:
     )
 
 
-def _same_lease_contract(entity: Lease, values: Mapping[str, object]) -> bool:
-    identity_matches = all(
+def _same_lease_identity(entity: Lease, values: Mapping[str, object]) -> bool:
+    return all(
         getattr(entity, field_name) == values[field_name]
         for field_name in ("worker_id", "owner", "purpose", "job_id", "attempt_id")
     )
-    requested_ttl = values["expires_at"] - values["created_at"]
-    persisted_ttl = entity.expires_at - entity.created_at
-    return identity_matches and requested_ttl == persisted_ttl

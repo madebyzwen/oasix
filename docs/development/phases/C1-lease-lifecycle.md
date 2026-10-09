@@ -54,9 +54,10 @@ Die Verträge sind:
 - **Acquire:** Ohne vorgegebene ID wird eine UUIDv4 erzeugt. Für
   Operations-Retry stellt der Aufrufer eine zuvor erzeugte stabile UUIDv4
   bereit. Dieselbe ID ist nur bei identischem Worker, Owner, Purpose sowie
-  identischen Job-/Attempt-Bezügen, gleicher ursprünglicher TTL und noch aktiver
-  Lease idempotent. Ein abweichender Vertrag ist ein Konflikt; erneutes Acquire
-  verlängert nicht.
+  identischen Job-/Attempt-Bezügen und noch aktiver Lease idempotent. Ein
+  abweichender unveränderlicher Identitätsbezug ist ein Konflikt. Die beim
+  wiederholten Aufruf angegebene TTL verändert die bestehende Lease nicht;
+  Verlängerungen erfolgen ausschließlich über Renew.
 - **Heartbeat/Renew:** Eine einzelne bedingte SQL-Aktualisierung verlangt eine
   nicht freigegebene, zum Beobachtungszeitpunkt noch nicht abgelaufene Lease.
   Heartbeat-Zeit kann nicht zurücklaufen und das Ablaufdatum wird nie verkürzt.
@@ -80,7 +81,10 @@ festgehalten.
   Aufrufer stabil gehaltene ID ist der Idempotenzschlüssel für Acquire.
 - TTLs sind positive ganze Sekunden an der Schnittstelle; gespeichert werden
   die bereits in A.2 festgelegten UTC-Epoch-Mikrosekunden. Der zulässige
-  Bereich wird gegen SQLite-`INTEGER` geprüft.
+  Bereich wird gegen SQLite-`INTEGER` geprüft. Die ursprüngliche TTL wird nicht
+  als separates unveränderliches Feld gespeichert und ist nach einem Renew aus
+  `created_at` und dem veränderlichen `expires_at` nicht rekonstruierbar. Sie ist
+  deshalb bewusst kein Bestandteil der Acquire-Idempotenzprüfung.
 - Konkurrenz wird durch `INSERT ... ON CONFLICT DO NOTHING` und bedingte
   `UPDATE`-Anweisungen abgesichert. SQLite bleibt Single-Writer. Ein nach dem
   konfigurierten Busy-Timeout verbleibender Lock wird kontrolliert gemeldet und
@@ -106,8 +110,8 @@ festgehalten.
 
 | Prüfung | Umgebung | Ergebnis | Nachweis |
 | --- | --- | --- | --- |
-| Lease-Lifecycle-Tests | lokal, macOS, Python 3.12 | 17 bestanden | `tests/test_lease_lifecycle.py` |
-| Vollständige pytest-Suite | lokal, macOS, Python 3.12 | 266 bestanden | `feature/b-llm-path` vor Commit |
+| Lease-Lifecycle-Tests | lokal, macOS, Python 3.12 | 20 bestanden | `tests/test_lease_lifecycle.py` |
+| Vollständige pytest-Suite | lokal, macOS, Python 3.12 | 269 bestanden | `feature/b-llm-path` vor Korrektur-Commit |
 | Ruff Linting und Formatprüfung | lokal, macOS, Python 3.12 | bestanden, 58 Dateien geprüft | `feature/b-llm-path` vor Commit |
 | Paket-, Import-, Dokumentationslink- und Diff-Prüfung | lokal | bestanden | `feature/b-llm-path` vor Commit |
 | Linux-CI | GitHub Actions, Ubuntu, Python 3.12 | nach Push ausstehend | [PR #6](https://github.com/madebyzwen/oasix/pull/6) |
@@ -149,8 +153,9 @@ nicht fortgesetzt und B.4/B.5 wurden nicht begonnen.
 
 ## 9. GitHub-Referenzen
 
-- Commit: wird mit `feat(leases): implement persistent lease lifecycle` auf
-  `feature/b-llm-path` erstellt
+- Implementierung: [`017c94d`](https://github.com/madebyzwen/oasix/commit/017c94dda1a1cc4ff12db065edce124801704287)
+- Review-Nachbesserung: `fix(leases): preserve acquire idempotency after renewal`
+  in [PR #6](https://github.com/madebyzwen/oasix/pull/6)
 - Pull Request: [PR #6](https://github.com/madebyzwen/oasix/pull/6), offen und
   nicht gemergt
-- Linux-CI: nach Push ausstehend
+- Linux-CI der Implementierung: [Lauf `38003515144`](https://github.com/madebyzwen/oasix/actions/runs/38003515144)
