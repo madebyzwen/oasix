@@ -70,6 +70,7 @@ _UniqueKeySafeLoader.add_constructor(
 class LoadedConfiguration:
     """Complete startup result. Secret values stay opaque in debug output."""
 
+    bootstrap: BootstrapSettings
     runtime: RuntimeConfig
     secrets: ResolvedSecrets
 
@@ -200,4 +201,8 @@ def load_startup_configuration(
     runtime = _validate_runtime_config(selected_bootstrap.config_file)
     source = FileSecretSource(selected_bootstrap.secrets_directory)
     secrets = resolve_secrets(collect_secret_references(runtime), source)
-    return LoadedConfiguration(runtime=runtime, secrets=secrets)
+    return LoadedConfiguration(
+        bootstrap=selected_bootstrap,
+        runtime=runtime,
+        secrets=secrets,
+    )

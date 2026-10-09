@@ -16,8 +16,12 @@ class BootstrapSettings(BaseSettings):
         frozen=True,
     )
 
-    config_file: Path = Field(description="Path to the external runtime YAML file")
+    config_file: Path = Field(
+        description="Path to the external runtime YAML file",
+        repr=False,
+    )
     secrets_directory: Path = Field(
         default=Path("/run/secrets"),
         description="Directory containing externally provisioned secret files",
+        repr=False,
     )

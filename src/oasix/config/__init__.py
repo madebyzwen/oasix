@@ -8,13 +8,14 @@ from oasix.config.errors import (
     StartupConfigurationError,
 )
 from oasix.config.loader import LoadedConfiguration, load_startup_configuration
-from oasix.config.models import RuntimeConfig
+from oasix.config.models import PersistenceSettings, RuntimeConfig
 from oasix.config.secrets import ResolvedSecrets, SecretSource
 
 __all__ = [
     "BootstrapConfigurationError",
     "BootstrapSettings",
     "LoadedConfiguration",
+    "PersistenceSettings",
     "ResolvedSecrets",
     "RuntimeConfig",
     "RuntimeConfigurationError",

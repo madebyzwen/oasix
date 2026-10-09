@@ -11,9 +11,12 @@ import yaml
 
 
 @pytest.fixture
-def valid_config_data() -> dict[str, Any]:
+def valid_config_data(tmp_path: Path) -> dict[str, Any]:
+    database_directory = tmp_path / "database"
+    database_directory.mkdir(mode=0o700)
+    database_directory.chmod(0o700)
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "active_worker": "worker-primary",
         "workers": {
             "worker-primary": {
@@ -81,6 +84,10 @@ def valid_config_data() -> dict[str, Any]:
                 "max_concurrent_jobs": 1,
                 "max_concurrent_inference_requests": 2,
             },
+        },
+        "persistence": {
+            "database_path": str(database_directory / "oasix.sqlite3"),
+            "busy_timeout_ms": 5000,
         },
     }
 

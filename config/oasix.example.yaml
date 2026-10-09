@@ -1,5 +1,9 @@
-schema_version: 1
+schema_version: 2
 active_worker: worker-primary
+
+persistence:
+  database_path: /absolute/path/provided-by-deployment/oasix.sqlite3
+  busy_timeout_ms: 5000
 
 workers:
   worker-primary:

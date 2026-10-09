@@ -46,7 +46,7 @@ def test_repository_example_is_a_valid_runtime_configuration(
         )
     )
 
-    assert loaded.runtime.schema_version == 1
+    assert loaded.runtime.schema_version == 2
     assert loaded.runtime.active_worker == "worker-primary"
 
 

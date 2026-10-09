@@ -24,7 +24,7 @@ def _load(data: dict[str, Any], write_config: Any, secret_directory: Path) -> No
 @pytest.mark.parametrize(
     ("mutate", "expected_path"),
     [
-        (lambda data: data.update(schema_version=2), "schema_version"),
+        (lambda data: data.update(schema_version=1), "schema_version"),
         (lambda data: data.pop("policies"), "policies"),
         (lambda data: data.update(active_worker="missing-worker"), "<root>"),
         (
@@ -111,7 +111,7 @@ def test_rejects_unknown_sleep_method(
 def test_rejects_duplicate_yaml_keys(tmp_path: Path, secret_directory: Path) -> None:
     config_path = tmp_path / "duplicate.yaml"
     config_path.write_text(
-        "schema_version: 1\nschema_version: 1\nactive_worker: worker-primary\n",
+        "schema_version: 2\nschema_version: 2\nactive_worker: worker-primary\n",
         encoding="utf-8",
     )
 

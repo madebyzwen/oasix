@@ -78,10 +78,10 @@ ausdrücklich noch nicht implementierte Entscheidungen.
 - **Quellen:** Requirement ARC-03, ARC-04, AGT-01, ALIAS-01 bis ALIAS-04;
   [models.py](../../src/oasix/config/models.py)
 
-## OASIX-DEC-005 – SQLite als geplante MVP-Persistenz
+## OASIX-DEC-005 – SQLite als MVP-Persistenz
 
-- **Status:** Im finalisierten A.2-Design festgelegt; Implementierung und
-  Produktionsvalidierung ausstehend
+- **Status:** Akzeptiert; technisches Fundament in A.2.1 implementiert,
+  Schema und Produktionsvalidierung ausstehend
 - **Kontext:** Jobs, Attempts, Queues, Leases, Control-State und zuordenbare
   Telemetrie benötigen eine transaktionale, migrationsfähige Persistenz auf der
   Control Plane.
@@ -100,11 +100,12 @@ ausdrücklich noch nicht implementierte Entscheidungen.
 - **Konsequenzen und Trade-offs:** SQLite bleibt Single-Writer. Schreibende
   Transaktionen müssen kurz sein, Lock-Konflikte begrenzt behandelt und
   WAL-sichere Backups verwendet werden. SQLAlchemy kapselt den Zugriff, ersetzt
-  aber keine spätere Datenmigration zu PostgreSQL. Die erste Migration bleibt
-  auf sechs fachliche Kerntabellen begrenzt; Anwendungscode, Migrationen und
-  Datenbankdateien existieren noch nicht.
+  aber keine spätere Datenmigration zu PostgreSQL. A.2.1 initialisiert eine
+  leere SQLite-WAL-Datei, ohne ein Anwendungsschema anzulegen. Die erste, noch
+  offene Migration bleibt auf sechs fachliche Kerntabellen begrenzt.
 - **Quellen:** Requirement JOB-03, JOB-04 und Abschnitt 13;
   [Phase-A.2-Design](phases/A2-persistence.md),
+  [Persistence-Initialisierung](../../src/oasix/persistence/database.py),
   [SQLite-WAL-Dokumentation](https://www.sqlite.org/wal.html)
 
 ## OASIX-DEC-006 – Kein zusätzlicher Message-Broker im MVP
@@ -173,7 +174,8 @@ ausdrücklich noch nicht implementierte Entscheidungen.
 
 ## OASIX-DEC-009 – Explizite Transaktionen und versionierte Alembic-Migrationen
 
-- **Status:** Im finalisierten A.2-Design festgelegt; Implementierung ausstehend
+- **Status:** Akzeptiert; Engine, Sessions und Transaktionskontext in A.2.1
+  implementiert, Alembic und fachliche Transaktionen ausstehend
 - **Kontext:** Job-/Attempt-Übergänge, Lease-Operationen und Recovery dürfen bei
   Abstürzen keinen teilweise aktualisierten Zustand hinterlassen. Das Schema
   muss gemäß JOB-04 migrationsfähig sein.
@@ -193,6 +195,7 @@ ausdrücklich noch nicht implementierte Entscheidungen.
   Backup erforderlich; Produktionsrollbacks erfolgen primär durch Restore.
 - **Quellen:** Requirement JOB-04;
   [Phase-A.2-Design](phases/A2-persistence.md),
+  [Persistence-Initialisierung](../../src/oasix/persistence/database.py),
   [Alembic-Batch-Dokumentation](https://alembic.sqlalchemy.org/en/latest/batch.html)
 
 ## OASIX-DEC-010 – Persistenzgrenzen und Lease-Autorität
@@ -225,7 +228,7 @@ ausdrücklich noch nicht implementierte Entscheidungen.
 
 ## OASIX-DEC-011 – Runtime-Schema Version 2 für Persistenz
 
-- **Status:** Im finalisierten A.2-Design festgelegt; Implementierung ausstehend
+- **Status:** Akzeptiert und in A.2.1 implementiert
 - **Kontext:** Die bisherige Runtime-Version 1 enthält Worker, Services und
   Policies, aber keinen sicheren, extern konfigurierten Datenbankpfad. Ein
   stiller Default oder eine neue Bootstrap-Variable würde die vorhandene
@@ -244,11 +247,12 @@ ausdrücklich noch nicht implementierte Entscheidungen.
   Umgebungsvariable wurden verworfen.
 - **Konsequenzen und Trade-offs:** Deployments müssen ihre YAML manuell auf
   Version 2 anheben. Der Zielpfad benötigt ein lokales persistentes Volume,
-  restriktive Rechte und Platz für DB, WAL und SHM. Version 1 behält bis zur
-  A.2-Implementierung unverändert ihre bisherige Bedeutung; der aktuelle Code
-  wird in diesem Designschritt nicht geändert.
+  restriktive Rechte und Platz für DB, WAL und SHM. Der aktuelle Loader weist
+  Version 1 sicher ab; es gibt keinen stillen Fallback und keine automatische
+  Aktualisierung der YAML-Datei.
 - **Quellen:** Requirement CFG-01, CFG-02, JOB-03 und JOB-04;
-  [Phase-A.2-Design](phases/A2-persistence.md#511-runtime-konfiguration-schema_version-2)
+  [Phase-A.2-Design](phases/A2-persistence.md#511-runtime-konfiguration-schema_version-2),
+  [Runtime-Modelle](../../src/oasix/config/models.py)
 
 ## OASIX-DEC-012 – Scope-bezogene, digestbasierte Job-Idempotenz
 
@@ -279,7 +283,8 @@ ausdrücklich noch nicht implementierte Entscheidungen.
 
 ## OASIX-DEC-013 – Einfache, begrenzte SQLite-Verbindungsbasis
 
-- **Status:** Im finalisierten A.2-Design festgelegt; Implementierung ausstehend
+- **Status:** Akzeptiert; Verbindungsbasis in A.2.1 implementiert, UUIDv4 wird
+  mit dem offenen Schema wirksam
 - **Kontext:** Python 3.12, SQLite und SQLAlchemy benötigen explizite
   Transaktions-, Foreign-Key- und Poolvorgaben, damit Plattformdefaults nicht
   unbemerkt die Persistenzsemantik verändern.
@@ -302,4 +307,6 @@ ausdrücklich noch nicht implementierte Entscheidungen.
   Deployment-Verantwortung. Andere Pool-/Timeout-Werte benötigen Messdaten.
 - **Quellen:** Requirement JOB-03, JOB-04 und CFG-01;
   [Phase-A.2-Design](phases/A2-persistence.md#513-engine-sessions-und-sqlite-pragmas),
+  [Engine-Implementierung](../../src/oasix/persistence/database.py),
+  [Pfadprüfung](../../src/oasix/persistence/paths.py),
   [PR #3](https://github.com/madebyzwen/oasix/pull/3)

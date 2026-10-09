@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
+from pathlib import Path
 from types import MappingProxyType
 from typing import Annotated, Literal
 
@@ -34,6 +35,7 @@ type NonNegativeFloat = Annotated[StrictFloat, Field(ge=0.0)]
 type PositiveMultiplier = Annotated[StrictFloat, Field(ge=1.0)]
 type JitterRatio = Annotated[StrictFloat, Field(ge=0.0, le=1.0)]
 type StatusCode = Annotated[StrictInt, Field(ge=100, le=599)]
+type BusyTimeoutMilliseconds = Annotated[StrictInt, Field(ge=1, le=60_000)]
 
 
 class StrictModel(BaseModel):
@@ -279,13 +281,28 @@ class Policies(StrictModel):
     concurrency: ConcurrencyLimits
 
 
+class PersistenceSettings(StrictModel):
+    """Validated runtime settings for the local SQLite persistence file."""
+
+    database_path: Path = Field(repr=False)
+    busy_timeout_ms: BusyTimeoutMilliseconds = 5_000
+
+    @field_validator("database_path")
+    @classmethod
+    def require_absolute_database_path(cls, value: Path) -> Path:
+        if not value.is_absolute():
+            raise ValueError("database path must be absolute")
+        return value
+
+
 class RuntimeConfig(StrictModel):
     """Fully validated runtime behavior; no bootstrap source locations are included."""
 
-    schema_version: Literal[1]
+    schema_version: Literal[2]
     active_worker: Identifier
     workers: Annotated[Mapping[Identifier, WorkerProfile], Field(min_length=1)]
     policies: Policies
+    persistence: PersistenceSettings
 
     @field_validator("workers")
     @classmethod
