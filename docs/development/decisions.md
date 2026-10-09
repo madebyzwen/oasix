@@ -6,7 +6,7 @@ ausdrücklich noch nicht implementierte Entscheidungen.
 
 ## OASIX-DEC-001 – Trennung von Control Plane und Compute Worker
 
-- **Status:** Verbindlich; in A.1 nur durch Konfigurationsgrenzen abgebildet
+- **Status:** Verbindlich; durch A.1-Konfiguration und A.3.1-Verträge abgebildet
 - **Kontext:** Steuerung und persistenter Zustand müssen dauerhaft verfügbar
   bleiben, während rechenintensive Arbeit auf einem austauschbaren Worker läuft.
 - **Gewählte Lösung:** Die Control Plane verantwortet Orchestrierung und Zustand.
@@ -16,8 +16,9 @@ ausdrücklich noch nicht implementierte Entscheidungen.
   den Austausch der Worker-Infrastruktur ohne Änderungen an der Kernlogik.
 - **Berücksichtigte Alternativen:** Eine gemeinsame Control-/Compute-Runtime
   widerspricht ARC-01 und ARC-02 und wurde ausgeschlossen.
-- **Konsequenzen und Trade-offs:** Kommunikation, Readiness und Recovery müssen
-  explizit modelliert werden. A.1 implementiert noch keine Worker-Ausführung.
+- **Konsequenzen und Trade-offs:** A.3.1 modelliert Kommunikation und Readiness
+  nur als technische Verträge. Produktive Adapter, Zustandslogik und Recovery
+  bleiben noch zu implementieren.
 - **Quellen:** Requirement ARC-01 bis ARC-04, DEP-01 bis DEP-04;
   [AGENTS.md](../../AGENTS.md)
 
@@ -63,7 +64,7 @@ ausdrücklich noch nicht implementierte Entscheidungen.
 
 ## OASIX-DEC-004 – Hardware- und Provider-Unabhängigkeit
 
-- **Status:** Verbindlich; im A.1-Konfigurationsmodell implementiert
+- **Status:** Verbindlich; in A.1-Konfiguration und A.3.1-Verträgen implementiert
 - **Kontext:** Worker-Hardware, Betriebssystem, Hostnamen, Modelle und spätere
   Agent-Runtimes müssen austauschbar bleiben.
 - **Gewählte Lösung:** Generische Worker- und Service-IDs, konfigurierbare
@@ -76,7 +77,8 @@ ausdrücklich noch nicht implementierte Entscheidungen.
 - **Konsequenzen und Trade-offs:** Konkrete Provideradapter und
   Multi-Worker-Scheduling sind noch nicht implementiert.
 - **Quellen:** Requirement ARC-03, ARC-04, AGT-01, ALIAS-01 bis ALIAS-04;
-  [models.py](../../src/oasix/config/models.py)
+  [Konfigurationsmodelle](../../src/oasix/config/models.py),
+  [Worker-Verträge](../../src/oasix/worker/contracts.py)
 
 ## OASIX-DEC-005 – SQLite als MVP-Persistenz
 
@@ -346,3 +348,72 @@ ausdrücklich noch nicht implementierte Entscheidungen.
 - **Quellen:** Requirement SEC-03, OBS-03, OBS-04 und AC-10;
   [Phase-A.2-Design](phases/A2-persistence.md#52-schutz-persistierter-nutzdaten),
   [Validierung](../../src/oasix/persistence/validation.py)
+
+## OASIX-DEC-015 – Fähigkeitsgetrennte asynchrone Worker-Verträge
+
+- **Status:** In A.3.1 implementiert, unabhängig geprüft und freigegeben
+- **Kontext:** Die Control Plane benötigt eine stabile Worker-Grenze, ohne
+  Hardware, Hostnamen, Transport, Power-Mechanismus oder noch ungeklärte
+  Ausführungssemantik in die Kernlogik zu übernehmen.
+- **Gewählte Lösung:** Ein aus der validierten Runtime-Konfiguration aufgelöstes
+  `ActiveWorkerTarget` bindet die generische Worker-ID an ihr Profil. Kleine
+  asynchrone `Protocol`-Ports trennen State-Beobachtung, servicebezogene
+  Readiness, Wake und Sleep. Ergebnisse sind unveränderlich; technische
+  Kommunikation und Timeout besitzen feste, sichere Fehlertypen. Der
+  verbindliche Worker-State-Enum ist zugleich Quelle der unveränderten
+  Persistenzwerte.
+- **Begründung:** Getrennte Fähigkeiten erlauben austauschbare Adapter und
+  verhindern, dass ein monolithischer Vertrag unbeteiligte Komponenten an
+  SSH, HTTP oder Power-Techniken koppelt. Asynchrone Ports passen zu entferntem
+  I/O; blockierende Bibliotheken müssen später im Adapter ausgelagert werden.
+  Ein Fehler bleibt von einem erfolgreich beobachteten Zustand beziehungsweise
+  Readiness-Ergebnis unterscheidbar.
+- **Berücksichtigte Alternativen:** Ein Gesamtadapter, Transportparameter in
+  jeder Methode, freie Fehlertexte und eine generische `execute()`-Operation
+  wurden verworfen. Insbesondere ist Start-/Status-/Streaming-Semantik für
+  spätere Ausführung noch nicht eindeutig festgelegt.
+- **Konsequenzen und Trade-offs:** Timeout, Retry, Zustandsübergänge und
+  Persistierung liegen außerhalb der Ports und müssen spätere
+  Orchestrierungsdienste übernehmen. Wake-/Sleep-Erfolg bestätigt nur die
+  Befehlsübergabe. Konkrete Ausführungs-, Cancellation- und
+  Recovery-Referenzverträge bleiben bis zu ihren Fachphasen offen.
+- **Quellen:** Requirement ARC-01 bis ARC-04, ALIAS-01 bis ALIAS-03, CFG-02 bis
+  CFG-04, WRK-01 bis WRK-05, PWR-02, SEC-02, SEC-03 und REC-04;
+  [Phase A.3.1](phases/A3-worker-contracts.md),
+  [Worker-Verträge](../../src/oasix/worker/contracts.py)
+
+## OASIX-DEC-016 – Geschlossene JSON-Lines-Logging-Grenze
+
+- **Status:** In A.3.2 implementiert, unabhängig geprüft und freigegeben
+- **Kontext:** Control Plane, Worker-Kommunikation und spätere Komponenten
+  benötigen korrelierbare strukturierte Logs, ohne Secrets, Payloads,
+  Providerantworten oder beliebige Python-Objekte zu serialisieren. Globale
+  Logger-Konfiguration würde Tests und eingebettete Nutzung unkontrolliert
+  beeinflussen.
+- **Gewählte Lösung:** OASIX verwendet kompakte JSON Lines aus dem
+  Standardmodul `logging`. Eine unveränderliche statische `EventDefinition`
+  liefert Ereigniscode und sichere Beschreibung. `StructuredLogger.emit()`
+  akzeptiert ausschließlich eine zentrale Allowlist feldspezifisch validierter
+  Korrelations- und Fehlerwerte. Die Factory erzeugt eine nicht global
+  registrierte, nicht propagierende Logger-Instanz. Der Formatter ignoriert
+  freie Messages, Argumente, Exceptions und unbekannte Record-Attribute; ein
+  fremder Record wird als festes `logging.invalid_record` abgebildet.
+- **Begründung:** Die geschlossene Eingabegrenze verhindert unsichere
+  Objekt-Dumps vor der Serialisierung und erfüllt OBS-01, SEC-03 sowie AC-10,
+  ohne eine Regex-basierte Secret-Erkennung als Schutzversprechen einzuführen.
+  Ein Eintrag pro Zeile kann später direkt über Container-Standardstreams
+  gesammelt werden.
+- **Berücksichtigte Alternativen:** Freie Textnachrichten mit nachträglicher
+  Redaktion, beliebige `extra`-Mappings, Exception-Serialisierung,
+  `logging.basicConfig()` und externe Logging-Frameworks wurden verworfen.
+- **Konsequenzen und Trade-offs:** Neue Ereignisse müssen als statische
+  Definitionen und neue Felder durch eine bewusste Allowlist-Erweiterung
+  eingeführt werden. Die Schicht kann einen syntaktisch gültigen Identifier
+  nicht semantisch von einem fälschlich so klassifizierten Plaintext-Secret
+  unterscheiden; korrekte Datenklassifikation vor dem Logaufruf bleibt
+  verbindlich. Rotation, Retention, Collector und operative Logaufrufe folgen
+  erst mit ihren Komponenten.
+- **Quellen:** Requirement ARC-03, ALIAS-01 bis ALIAS-03, SEC-02, SEC-03,
+  OBS-01, OBS-03, REC-04 und AC-10;
+  [Phase A.3.2](phases/A3-logging.md),
+  [Logging-Implementierung](../../src/oasix/logging/core.py)

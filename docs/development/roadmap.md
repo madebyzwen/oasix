@@ -1,6 +1,6 @@
 # Entwicklungsroadmap
 
-Stand: 9. Oktober 2026
+Stand: 10. Oktober 2026
 
 Die Roadmap beschreibt den Repository-Stand, nicht den gesamten Zielumfang des
 [Technical Requirement v3.4](../OASIX_Technical_Requirement_Reviewed_v3.4.docx).
@@ -18,10 +18,16 @@ festgelegte Umfang implementiert und geprüft wurde.
 | A.2.1 – Runtime-Konfiguration und SQLite-Fundament | Abgeschlossen | Runtime-Schema v2, sichere Datenbankpfadprüfung, begrenzte SQLAlchemy-Engine, verifizierte SQLite-Pragmas sowie Session- und Transaktionskontexte sind implementiert und getestet. | [Phase A.2](phases/A2-persistence.md), [Commit `cba7be6`](https://github.com/madebyzwen/oasix/commit/cba7be6) |
 | A.2.2 – Schema und Initialmigration | Abgeschlossen und unabhängig geprüft | Sechs SQLAlchemy-Modelle, ihre benannten Constraints und Indizes sowie die lineare Alembic-Initialrevision `0001_a2_2` sind implementiert und freigegeben. Runtime-Initialisierung führt keine automatische Migration aus. | [Phase A.2](phases/A2-persistence.md#4-entscheidungen-und-migrationsumfang), [Commit `09ea7f3`](https://github.com/madebyzwen/oasix/commit/09ea7f33347bc2763cae71ba8af5f8802288267b), [Linux-CI](https://github.com/madebyzwen/oasix/actions/runs/37993363281/job/114032986707) |
 | A.2.3 – Persistenzzugriff und Integritätsnachweise | Abgeschlossen und unabhängig geprüft | Session-gebundene Repositories, zentrale typisierte Nutzdatenvalidierung, sichere Fehlerkategorien, lesender Revisionsschutz und die verbleibenden A.2-Integritätsnachweise sind implementiert und freigegeben. Nicht definierte Payload- und Referenzverträge werden geschlossen abgewiesen. | [Phase A.2](phases/A2-persistence.md#6-tests-und-nachweise), [Commit `c8f53b8`](https://github.com/madebyzwen/oasix/commit/c8f53b8b274bad3748aea48ad4172fb13dbfa60c), [Linux-CI](https://github.com/madebyzwen/oasix/actions/runs/37995302736/job/114039691204) |
+| A.3.1 – Generische Worker-Verträge | Abgeschlossen und unabhängig geprüft | Konfigurationsgebundene Worker-Auflösung, kanonische Worker-Zustände sowie getrennte asynchrone Verträge für Beobachtung, servicebezogene Readiness, Wake und Sleep sind implementiert und freigegeben. Produktive Adapter und Orchestrierungslogik sind nicht enthalten. | [Phase A.3.1](phases/A3-worker-contracts.md), [Commit `766af949`](https://github.com/madebyzwen/oasix/commit/766af94962cd6fc99c42fc9fe7e784acb00f92d9), [PR #5](https://github.com/madebyzwen/oasix/pull/5) |
+| A.3.2 – Strukturiertes Logging | Abgeschlossen und unabhängig geprüft | Isolierte JSON-Lines-Logger, statische Ereignisdefinitionen, zentrale Feld-Allowlist, Korrelationskennungen und sichere Fehlergrenzen sind implementiert und freigegeben. Operative Logaufrufe und externe Logging-Infrastruktur sind nicht enthalten. | [Phase A.3.2](phases/A3-logging.md), [Commit `647ca76`](https://github.com/madebyzwen/oasix/commit/647ca76eb9e0f881586a78d799def684ddbe7a84), [Linux-CI](https://github.com/madebyzwen/oasix/actions/runs/38000156438), [PR #5](https://github.com/madebyzwen/oasix/pull/5) |
 
-Phase A des Requirements ist trotz abgeschlossener A.1 und implementiertem
-A.2-Persistenzfundament noch nicht insgesamt abgeschlossen: Generischer Worker
-und strukturierte Logs folgen in späteren Teilphasen.
+Der festgelegte A.3-Umfang aus generischen Worker-Verträgen und strukturiertem
+Logging ist abgeschlossen und unabhängig geprüft. Phase A des Requirements ist
+trotz abgeschlossener A.1, abgeschlossenem A.2-Persistenzfundament und
+abgeschlossenem A.3-Umfang noch nicht insgesamt abgeschlossen: Produktive
+Worker-Kommunikation, Wake-/Sleep-Ausführung, operative Readiness, die
+Integration operativer Logereignisse und weitere Orchestrierungsfunktionen
+folgen in späteren Phasen.
 
 ## Weitere MVP-Stufen
 
