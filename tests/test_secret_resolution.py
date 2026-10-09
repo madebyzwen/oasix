@@ -13,7 +13,7 @@ from oasix.config import (
     load_startup_configuration,
 )
 from oasix.config.models import SecretReference
-from oasix.config.secrets import FileSecretSource
+from oasix.config.secrets import MAX_SECRET_FILE_SIZE_BYTES, FileSecretSource
 
 
 def test_resolves_secret_and_masks_every_debug_representation(
@@ -86,6 +86,61 @@ def test_empty_secret_fails_startup(
                 secrets_directory=secret_directory,
             )
         )
+
+
+@pytest.mark.parametrize(
+    "size",
+    [MAX_SECRET_FILE_SIZE_BYTES - 1, MAX_SECRET_FILE_SIZE_BYTES],
+    ids=["below-limit", "at-limit"],
+)
+def test_accepts_secret_files_up_to_size_limit(
+    size: int,
+    secret_directory: Path,
+) -> None:
+    secret_path = secret_directory / "bounded_secret"
+    secret_path.write_bytes(b"x" * size)
+    source = FileSecretSource(secret_directory)
+
+    secret = source.resolve(SecretReference(source="file", name="bounded_secret"))
+
+    assert len(secret.get_secret_value().encode("utf-8")) == size
+
+
+def test_rejects_secret_file_above_size_limit_without_exposing_content(
+    secret_directory: Path,
+) -> None:
+    sentinel = b"OVERSIZED-SECRET-MUST-NOT-LEAK"
+    content = sentinel + b"x" * (MAX_SECRET_FILE_SIZE_BYTES + 1 - len(sentinel))
+    (secret_directory / "oversized_secret").write_bytes(content)
+    source = FileSecretSource(secret_directory)
+
+    with pytest.raises(SecretResolutionError) as captured:
+        source.resolve(SecretReference(source="file", name="oversized_secret"))
+
+    assert "maximale Größe von 1 MiB" in str(captured.value)
+    assert sentinel.decode("ascii") not in str(captured.value)
+    assert sentinel.decode("ascii") not in repr(captured.value)
+
+
+def test_rejects_secret_growing_beyond_limit_after_descriptor_size_check(
+    secret_directory: Path,
+    monkeypatch: Any,
+) -> None:
+    secret_path = secret_directory / "growing_secret"
+    secret_path.write_bytes(b"x" * MAX_SECRET_FILE_SIZE_BYTES)
+    original_descriptor_path = secrets_module._descriptor_path
+
+    def grow_file_after_metadata_check(file_descriptor: int) -> Path | None:
+        opened_path = original_descriptor_path(file_descriptor)
+        with secret_path.open("ab") as secret_file:
+            secret_file.write(b"y")
+        return opened_path
+
+    monkeypatch.setattr(secrets_module, "_descriptor_path", grow_file_after_metadata_check)
+    source = FileSecretSource(secret_directory)
+
+    with pytest.raises(SecretResolutionError, match="maximale Größe von 1 MiB"):
+        source.resolve(SecretReference(source="file", name="growing_secret"))
 
 
 def test_rejects_secret_reference_path_traversal() -> None:

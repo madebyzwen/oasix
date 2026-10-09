@@ -155,6 +155,74 @@ def test_rejects_sensitive_service_url_components_without_echoing_url(
     assert sentinel not in production_traceback_locals(captured.value)
 
 
+def test_allows_legitimate_service_api_path(
+    valid_config_data: dict[str, Any],
+    write_config: Any,
+    secret_directory: Path,
+) -> None:
+    endpoint = "https://service.example.invalid/api/v1/inference"
+    valid_config_data["workers"]["worker-primary"]["services"]["llm"]["endpoint"] = endpoint
+
+    loaded = load_startup_configuration(
+        BootstrapSettings(
+            config_file=write_config(valid_config_data),
+            secrets_directory=secret_directory,
+        )
+    )
+
+    service = loaded.runtime.active_worker_profile.services["llm"]
+    assert service.endpoint.path == "/api/v1/inference"
+
+
+@pytest.mark.parametrize(
+    "mac_address",
+    [
+        "00:11:22:33:44:55",
+        "02:00:00:00:00:01",
+    ],
+    ids=["globally-administered", "locally-administered"],
+)
+def test_accepts_unicast_wake_on_lan_mac_addresses(
+    mac_address: str,
+    valid_config_data: dict[str, Any],
+    write_config: Any,
+    secret_directory: Path,
+) -> None:
+    valid_config_data["workers"]["worker-primary"]["power"]["wake"]["mac_address"] = mac_address
+
+    loaded = load_startup_configuration(
+        BootstrapSettings(
+            config_file=write_config(valid_config_data),
+            secrets_directory=secret_directory,
+        )
+    )
+
+    assert loaded.runtime.active_worker_profile.power.wake.mac_address == mac_address
+
+
+@pytest.mark.parametrize(
+    "mac_address",
+    [
+        "FF:FF:FF:FF:FF:FF",
+        "01:00:5E:00:00:01",
+        "33:33:00:00:00:01",
+    ],
+    ids=["broadcast", "ipv4-multicast", "ipv6-multicast"],
+)
+def test_rejects_non_unicast_wake_on_lan_mac_addresses(
+    mac_address: str,
+    valid_config_data: dict[str, Any],
+    write_config: Any,
+    secret_directory: Path,
+) -> None:
+    valid_config_data["workers"]["worker-primary"]["power"]["wake"]["mac_address"] = mac_address
+
+    with pytest.raises(RuntimeConfigurationError) as captured:
+        _load(valid_config_data, write_config, secret_directory)
+
+    assert "workers.<worker-id>.power.wake.wol.mac_address" in str(captured.value)
+
+
 @pytest.mark.parametrize(
     "readiness_path",
     [

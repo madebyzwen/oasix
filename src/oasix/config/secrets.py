@@ -15,6 +15,9 @@ from pydantic import SecretStr
 from oasix.config.errors import SecretResolutionError
 from oasix.config.models import RuntimeConfig, SecretReference
 
+MAX_SECRET_FILE_SIZE_BYTES = 1_048_576
+"""Maximum accepted secret-file content size (1 MiB)."""
+
 try:
     import fcntl
 except ImportError:  # pragma: no cover - unavailable outside POSIX platforms
@@ -72,6 +75,10 @@ class FileSecretSource:
         if status == "not_regular":
             raise SecretResolutionError(
                 f"Secret-Referenz '{reference.name}' verweist nicht auf eine reguläre Datei."
+            )
+        if status == "too_large":
+            raise SecretResolutionError(
+                f"Secret-Referenz '{reference.name}' überschreitet die maximale Größe von 1 MiB."
             )
         if status in {"changed", "unverified"}:
             raise SecretResolutionError(
@@ -143,9 +150,21 @@ def _read_verified_secret(
             opened_status.st_ino,
         ):
             return None, "changed"
+        if opened_status.st_size > MAX_SECRET_FILE_SIZE_BYTES:
+            return None, "too_large"
 
         chunks: list[bytes] = []
-        while chunk := os.read(secret_descriptor, 8192):
+        bytes_read = 0
+        while True:
+            # One bounded look-ahead byte is required to distinguish an exact-limit
+            # file from a file which grew after the descriptor metadata check.
+            read_size = min(8192, MAX_SECRET_FILE_SIZE_BYTES + 1 - bytes_read)
+            chunk = os.read(secret_descriptor, read_size)
+            if not chunk:
+                break
+            bytes_read += len(chunk)
+            if bytes_read > MAX_SECRET_FILE_SIZE_BYTES:
+                return None, "too_large"
             chunks.append(chunk)
         value = b"".join(chunks).decode("utf-8").rstrip("\r\n")
         return value, "ok"

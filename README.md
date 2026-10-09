@@ -153,12 +153,25 @@ Fehlende Pflichtfelder, unbekannte Felder, ungültige Policies und nicht
 auflösbare Secrets verhindern den Start. Secret-Inhalte werden in
 Fehlermeldungen und Debug-Repräsentationen nicht ausgegeben.
 
+Service-Basis-URLs dürfen weder URL-Userinfo noch Query-Parameter oder Fragmente
+enthalten. Legitime API-Pfade bleiben erlaubt. Zugangsdaten dürfen jedoch auch
+nicht in URL-Pfadsegmenten abgelegt werden, sondern ausschließlich über
+Secret-Referenzen bereitgestellt werden. Da beliebige Pfadbestandteile nicht
+zuverlässig als Zugangsdaten erkennbar sind, setzt OASIX hierfür bewusst keine
+scheinbar sichere Token-Heuristik ein; die Einhaltung dieser Regel liegt bei der
+Konfiguration und ihrem Deployment-Prozess.
+
 Secret-Dateien werden relativ zu einem geöffneten Verzeichnis-Descriptor
 geöffnet. Anschließend werden Typ, kanonischer Pfad sowie Device- und Inode-ID
 des tatsächlich geöffneten Datei-Descriptors geprüft, bevor aus genau diesem
 Descriptor gelesen wird. Linux verwendet dafür `/proc/self/fd`, macOS
 `F_GETPATH`; kann der geöffnete Pfad nicht sicher bestimmt werden, schlägt der
 Start geschlossen fehl.
+
+Eine einzelne Secret-Datei darf höchstens 1 MiB (1.048.576 Bytes) groß sein.
+OASIX prüft sowohl die über den geöffneten Descriptor gemeldete Dateigröße als
+auch die tatsächlich gelesene Datenmenge; dadurch bleibt das Einlesen selbst
+bei einer nachträglich wachsenden Datei begrenzt.
 
 Die Descriptor-Prüfung verhindert keinen in-place Schreibzugriff auf eine
 bereits geöffnete Datei. Das Secret-Verzeichnis und seine Dateien müssen daher

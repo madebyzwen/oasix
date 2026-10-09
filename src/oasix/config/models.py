@@ -104,6 +104,11 @@ class WakeOnLan(StrictModel):
     def validate_mac_address(cls, value: str) -> str:
         if re.fullmatch(r"(?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", value) is None:
             raise ValueError("invalid MAC address")
+        address = bytes.fromhex(value.replace(":", ""))
+        if address == b"\xff" * 6:
+            raise ValueError("broadcast MAC address is not allowed")
+        if address[0] & 0x01:
+            raise ValueError("multicast MAC address is not allowed")
         return value
 
     @field_validator("broadcast_host")
