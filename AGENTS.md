@@ -112,6 +112,9 @@ Bei Widersprüchen oder Unklarheiten ist vor der Implementierung nachzufragen.
 - Neue Funktionen und Fehlerkorrekturen benötigen passende automatisierte
   Tests. Diese decken insbesondere die betroffenen Persistenz-, Recovery-,
   Lease-, Retry-, API- und Sicherheitsinvarianten ab.
+- Neue Entwicklungsphasen und wesentliche Architekturentscheidungen müssen in
+  `docs/development/` dokumentiert und mit den zugehörigen Änderungen im selben
+  Commit beziehungsweise Pull Request synchron gehalten werden.
 - Jede Implementierung muss das Technical Requirement v3.4 erfüllen. Dessen
   MUSS-Anforderungen sind verbindlich; SOLL-Abweichungen werden begründet und
   dokumentiert.
