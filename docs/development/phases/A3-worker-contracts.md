@@ -1,6 +1,6 @@
 # Phase A.3.1 – Generische Worker-Verträge
 
-Status: implementiert, unabhängige Review-Abnahme ausstehend
+Status: abgenommen
 
 ## 1. Ziel und Abgrenzung
 
@@ -137,10 +137,10 @@ Worker-Aktionen werden nicht verwendet.
 
 ## 8. Abnahmestatus
 
-Der A.3.1-Implementierungsumfang ist lokal umgesetzt und durch Linux-CI
-bestätigt. Die unabhängige Code-Review-Abnahme steht noch aus. A.3 insgesamt
-und Phase A insgesamt sind nicht abgeschlossen; produktive Worker-Funktionen
-und strukturierte Logs fehlen weiterhin.
+Der A.3.1-Implementierungsumfang ist lokal umgesetzt, durch Linux-CI bestätigt
+und unabhängig geprüft und freigegeben. A.3 insgesamt und Phase A insgesamt
+sind nicht abgeschlossen; produktive Worker-Funktionen bleiben weiterhin
+späteren Teilphasen vorbehalten.
 
 ## 9. GitHub-Referenzen
 

@@ -22,6 +22,7 @@ Vorgaben konkreten Implementierungsphasen zu und unterscheiden dabei zwischen:
 - [Phase A.1 – Konfiguration und Secrets](phases/A1-configuration.md)
 - [Phase A.2 – Persistenzdesign](phases/A2-persistence.md)
 - [Phase A.3.1 – Generische Worker-Verträge](phases/A3-worker-contracts.md)
+- [Phase A.3.2 – Strukturiertes Logging](phases/A3-logging.md)
 - [Vorlage für zukünftige Phasen](templates/phase-template.md)
 
 Das A.2-Design ist abgeschlossen. A.2.1 implementiert Runtime-Schema v2 und das
@@ -31,10 +32,13 @@ Anwendungsvalidierung, sichere Persistenzfehler und Revisionsschutz. Fachliche
 Zustandsautomaten und konkrete Payload-/Adapterverträge bleiben späteren
 Phasen vorbehalten.
 
-A.3.1 implementiert die generische, transportneutrale Worker-Vertragsgrenze
-mit konfigurationsgebundener Identität, Zustandsbeobachtung, servicebezogener
-Readiness sowie vorbereitenden Wake-/Sleep-Ports. Produktive Adapter und
-Orchestrierungslogik bleiben späteren Teilphasen vorbehalten.
+A.3.1 ist unabhängig geprüft und implementiert die generische,
+transportneutrale Worker-Vertragsgrenze mit konfigurationsgebundener Identität,
+Zustandsbeobachtung, servicebezogener Readiness sowie vorbereitenden
+Wake-/Sleep-Ports. A.3.2 ergänzt ein implementiertes, noch nicht unabhängig
+freigegebenes JSON-Lines-Loggingfundament mit geschlossener Feld-Allowlist.
+Produktive Adapter und Orchestrierungslogik bleiben späteren Teilphasen
+vorbehalten.
 
 ## Pflegeregeln
 

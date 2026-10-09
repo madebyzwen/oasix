@@ -351,7 +351,7 @@ ausdrücklich noch nicht implementierte Entscheidungen.
 
 ## OASIX-DEC-015 – Fähigkeitsgetrennte asynchrone Worker-Verträge
 
-- **Status:** In A.3.1 implementiert; unabhängige Review-Abnahme ausstehend
+- **Status:** In A.3.1 implementiert, unabhängig geprüft und freigegeben
 - **Kontext:** Die Control Plane benötigt eine stabile Worker-Grenze, ohne
   Hardware, Hostnamen, Transport, Power-Mechanismus oder noch ungeklärte
   Ausführungssemantik in die Kernlogik zu übernehmen.
@@ -381,3 +381,39 @@ ausdrücklich noch nicht implementierte Entscheidungen.
   CFG-04, WRK-01 bis WRK-05, PWR-02, SEC-02, SEC-03 und REC-04;
   [Phase A.3.1](phases/A3-worker-contracts.md),
   [Worker-Verträge](../../src/oasix/worker/contracts.py)
+
+## OASIX-DEC-016 – Geschlossene JSON-Lines-Logging-Grenze
+
+- **Status:** In A.3.2 implementiert; unabhängige Review-Abnahme ausstehend
+- **Kontext:** Control Plane, Worker-Kommunikation und spätere Komponenten
+  benötigen korrelierbare strukturierte Logs, ohne Secrets, Payloads,
+  Providerantworten oder beliebige Python-Objekte zu serialisieren. Globale
+  Logger-Konfiguration würde Tests und eingebettete Nutzung unkontrolliert
+  beeinflussen.
+- **Gewählte Lösung:** OASIX verwendet kompakte JSON Lines aus dem
+  Standardmodul `logging`. Eine unveränderliche statische `EventDefinition`
+  liefert Ereigniscode und sichere Beschreibung. `StructuredLogger.emit()`
+  akzeptiert ausschließlich eine zentrale Allowlist feldspezifisch validierter
+  Korrelations- und Fehlerwerte. Die Factory erzeugt eine nicht global
+  registrierte, nicht propagierende Logger-Instanz. Der Formatter ignoriert
+  freie Messages, Argumente, Exceptions und unbekannte Record-Attribute; ein
+  fremder Record wird als festes `logging.invalid_record` abgebildet.
+- **Begründung:** Die geschlossene Eingabegrenze verhindert unsichere
+  Objekt-Dumps vor der Serialisierung und erfüllt OBS-01, SEC-03 sowie AC-10,
+  ohne eine Regex-basierte Secret-Erkennung als Schutzversprechen einzuführen.
+  Ein Eintrag pro Zeile kann später direkt über Container-Standardstreams
+  gesammelt werden.
+- **Berücksichtigte Alternativen:** Freie Textnachrichten mit nachträglicher
+  Redaktion, beliebige `extra`-Mappings, Exception-Serialisierung,
+  `logging.basicConfig()` und externe Logging-Frameworks wurden verworfen.
+- **Konsequenzen und Trade-offs:** Neue Ereignisse müssen als statische
+  Definitionen und neue Felder durch eine bewusste Allowlist-Erweiterung
+  eingeführt werden. Die Schicht kann einen syntaktisch gültigen Identifier
+  nicht semantisch von einem fälschlich so klassifizierten Plaintext-Secret
+  unterscheiden; korrekte Datenklassifikation vor dem Logaufruf bleibt
+  verbindlich. Rotation, Retention, Collector und operative Logaufrufe folgen
+  erst mit ihren Komponenten.
+- **Quellen:** Requirement ARC-03, ALIAS-01 bis ALIAS-03, SEC-02, SEC-03,
+  OBS-01, OBS-03, REC-04 und AC-10;
+  [Phase A.3.2](phases/A3-logging.md),
+  [Logging-Implementierung](../../src/oasix/logging/core.py)
