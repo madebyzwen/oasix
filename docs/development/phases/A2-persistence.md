@@ -1,6 +1,6 @@
 # Phase A.2 – Datenbankdesign und Architekturplanung
 
-Status: **Design abgeschlossen – A.2.1 bis A.2.3 implementiert, Review ausstehend**
+Status: **A.2 abgeschlossen – A.2.1 bis A.2.3 implementiert, unabhängig geprüft und freigegeben**
 
 ## 1. Ziel und Abgrenzung
 
@@ -19,9 +19,9 @@ Geschäftslogik und vollständigen Zustandsautomaten folgen in späteren Phasen.
 
 | Etappe | Status | Umfang |
 | --- | --- | --- |
-| A.2.1 | Implementiert; Review ausstehend | Runtime-Version 2, Datenbankpfadprüfung, Engine, Pflicht-Pragmas, begrenzter Pool, Session- und Transaktionslebenszyklus |
-| A.2.2 | Implementiert; Review ausstehend | Sechs SQLAlchemy-Kerntabellen, benannte Constraints und Indizes, Initialrevision `0001_a2_2` sowie Integritätsprüfungen |
-| A.2.3 | Implementiert; Review ausstehend | Session-gebundene Repositories, zentrale Pydantic-Validierung, sichere Fehlerkategorien, Revisionsschutz und verbleibende A.2-Integritätsnachweise |
+| A.2.1 | Abgeschlossen | Runtime-Version 2, Datenbankpfadprüfung, Engine, Pflicht-Pragmas, begrenzter Pool, Session- und Transaktionslebenszyklus |
+| A.2.2 | Abgeschlossen; unabhängig geprüft und freigegeben | Sechs SQLAlchemy-Kerntabellen, benannte Constraints und Indizes, Initialrevision `0001_a2_2` sowie Integritätsprüfungen |
+| A.2.3 | Abgeschlossen; unabhängig geprüft und freigegeben | Session-gebundene Repositories, zentrale Pydantic-Validierung, sichere Fehlerkategorien, Revisionsschutz und verbleibende A.2-Integritätsnachweise |
 
 ## 2. Verbindliche Anforderungen
 
@@ -807,7 +807,7 @@ Datenbanken und benötigen weder Netzwerkzugriffe noch reale Secret-Dateien.
 - keine automatische Anlage eines Anwendungsschemas sowie Redaktion privater
   Pfade und gebundener SQL-Parameter in Fehlerrepräsentationen.
 
-### A.2.2 – implementiert und lokal nachgewiesen
+### A.2.2 – implementiert und unabhängig geprüft
 
 - exakt sechs deklarative SQLAlchemy-Modelle und eine gemeinsame
   `Base.metadata`, einschließlich dokumentierter Beziehungen und
@@ -828,7 +828,7 @@ Datenbanken und benötigen weder Netzwerkzugriffe noch reale Secret-Dateien.
 - `foreign_key_check`, `integrity_check`, Revisionsprüfung, sichere
   SQL-Parameterdarstellung und Fail-Closed-Test bei fehlendem `json_valid`.
 
-### A.2.3 – implementiert und lokal nachgewiesen
+### A.2.3 – implementiert und unabhängig geprüft
 
 - Session-gebundene Repositories für alle sechs Entitäten, Lesezugriffe ohne
   Seiteneffekte, caller-eigene Transaktionen und append-only Eventzugriff,
@@ -969,10 +969,9 @@ zugehörigen fachlichen Verträgen.
 
 ## 8. Abnahmestatus
 
-Der Architektur-Review ist abgeschlossen und der A.2-Entwurf ist
-**designseitig freigegeben**. A.2.1 bis A.2.3 sind implementiert und lokal
-geprüft; die unabhängige Code-Review-Abnahme für den aktuellen Feature-Branch
-steht noch aus.
+Der Architektur-Review und die unabhängige Integrationsabnahme sind
+abgeschlossen. A.2.1 bis A.2.3 sind implementiert, geprüft und freigegeben;
+damit ist der definierte Implementierungsumfang von Phase A.2 abgeschlossen.
 
 Das vorhandene Fundament belegt Konfigurations-, Verbindungs-, Schema-,
 Migrations-, Repository- und Datenbankintegritätseigenschaften, aber noch keine
@@ -983,6 +982,9 @@ fachlichen Transitionen, Recovery oder Produktionsreife.
 - Design-Pull-Request:
   [PR #3 – docs: design A2 persistence architecture](https://github.com/madebyzwen/oasix/pull/3)
 - A.2.1-Implementierungs-Commit: `cba7be6`
-- A.2.2-Implementierungs-Commit: `09ea7f3`
-- A.2.3-Implementierung: PR #4 auf `feature/a2-persistence`; Commit und CI-Lauf
-  werden mit diesem Arbeitsauftrag erzeugt
+- A.2.2: [Commit `09ea7f3`](https://github.com/madebyzwen/oasix/commit/09ea7f33347bc2763cae71ba8af5f8802288267b),
+  [erfolgreicher Linux-CI-Lauf](https://github.com/madebyzwen/oasix/actions/runs/37993363281/job/114032986707)
+- A.2.3: [Commit `c8f53b8`](https://github.com/madebyzwen/oasix/commit/c8f53b8b274bad3748aea48ad4172fb13dbfa60c),
+  [erfolgreicher Linux-CI-Lauf](https://github.com/madebyzwen/oasix/actions/runs/37995302736/job/114039691204)
+- Implementierungs-Pull-Request:
+  [PR #4 – feat(persistence): complete A.2 SQLite persistence foundation](https://github.com/madebyzwen/oasix/pull/4)
