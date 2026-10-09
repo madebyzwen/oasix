@@ -447,3 +447,34 @@ ausdrücklich noch nicht implementierte Entscheidungen.
   SEC-03 und AC-10; [Phase B.1](phases/B1-http-readiness.md),
   [HTTPX Async Support](https://www.python-httpx.org/async/),
   [HTTPX Environment Variables](https://www.python-httpx.org/environment_variables/)
+
+## OASIX-DEC-018 – Begrenzte Wake- und Readiness-Orchestrierung ohne State-Automat
+
+- **Status:** In B.2 implementiert; unabhängige Review-Abnahme ausstehend
+- **Kontext:** Ein Wake-on-LAN-Paket bestätigt nur die Übergabe eines
+  Netzwerkdatagramms. Tatsächliche Bereitschaft darf erst nach erfolgreichen
+  servicebezogenen Probes angenommen werden. v3.4 verlangt begrenzte Versuche,
+  konfigurierten Backoff und optionalen Jitter, legt in B.2 aber keinen
+  persistenten Worker-State-Automaten fest.
+- **Gewählte Lösung:** Ein aktiver-worker-gebundener Controller erzeugt das
+  standardisierte 102-Byte-Magic-Packet und sendet es per UDP-Broadcast an das
+  konfigurierte Ziel. Ein separater Orchestrator prüft zunächst Readiness,
+  führt danach höchstens `retry.wake.max_attempts` Wake-Versuche aus und prüft
+  nach jedem konfigurierten Delay alle angeforderten Services. Der Backoff wird
+  an `max_delay_seconds` begrenzt; optionaler Jitter variiert ihn symmetrisch um
+  den konfigurierten Anteil. Wake und jede Probe werden zusätzlich durch
+  `readiness_timeout_seconds` begrenzt.
+- **Begründung:** Wake-Transport, Readiness-Probe und Orchestrierung bleiben
+  getrennte Verantwortlichkeiten. Nur bestätigte Service-Readiness öffnet das
+  Gate; weder Datagrammversand noch ein einzelner positiver Dienst genügen.
+- **Berücksichtigte Alternativen:** Wake-Erfolg als `READY`, unbeschränkte
+  Polling-Schleifen, feste Retry-Zeiten, parallele Aktivitätszähler und ein in
+  B.2 vorgezogener persistenter State-Automat wurden ausgeschlossen.
+- **Konsequenzen und Trade-offs:** B.2 setzt und persistiert bewusst keinen
+  Worker-State. Erschöpfte Versuche führen zu einem festen
+  `WorkerUnavailableError`. Die aktuelle Probe-Reihenfolge ist deterministisch
+  und sequenziell; hohe Servicezahlen könnten später eine begrenzte parallele
+  Prüfung rechtfertigen. DNS- und UDP-Verhalten realer Broadcast-Netze bleibt
+  durch einen Deployment-Smoke-Test zu prüfen.
+- **Quellen:** Requirement CFG-02, CFG-05, WRK-03 bis WRK-05, PWR-02, REC-03
+  und AC-03; [Phase B.2](phases/B2-wake-readiness.md)
