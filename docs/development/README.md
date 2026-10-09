@@ -20,10 +20,11 @@ Vorgaben konkreten Implementierungsphasen zu und unterscheiden dabei zwischen:
 - [Roadmap und Phasenstatus](roadmap.md)
 - [Architektur- und Implementierungsentscheidungen](decisions.md)
 - [Phase A.1 – Konfiguration und Secrets](phases/A1-configuration.md)
+- [Phase A.2 – Persistenzdesign](phases/A2-persistence.md)
 - [Vorlage für zukünftige Phasen](templates/phase-template.md)
 
-Eine Dokumentation für A.2 wird erst angelegt, wenn diese Phase tatsächlich
-beginnt.
+Phase A.2 befindet sich im reinen Designstadium. Ihre dokumentierten Tabellen,
+Transaktionen und Betriebsabläufe sind noch nicht implementiert.
 
 ## Pflegeregeln
 
