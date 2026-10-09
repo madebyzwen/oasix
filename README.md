@@ -191,9 +191,9 @@ für die Control Plane und nicht vertrauenswürdige Prozesse unveränderlich sei
 und sollen im Deployment read-only mit restriktiven Berechtigungen
 bereitgestellt werden.
 
-## Client-Authentifizierungsfundament
+## Client-Authentifizierung und LLM-Gateway
 
-Runtime-`schema_version: 3` ergänzt die verpflichtende `client_auth`-Sektion.
+Runtime-`schema_version: 3` ergänzte die verpflichtende `client_auth`-Sektion.
 Jede generisch benannte Client-Identität verweist auf mindestens eine externe
 Secret-Datei und erhält ausschließlich explizit konfigurierte Berechtigungen:
 
@@ -223,19 +223,28 @@ authorizer = ClientAuthorizer()
 
 Schlüsselwerte werden im langlebigen Authenticator nur als prozesslokal
 gepepperte Digests gehalten. Fehlende, ungültige und unbekannte Bearer-
-Credentials liefern dieselbe sichere Fehlerkategorie. Die zukünftige HTTP-
-Schicht und produktive Routen sind noch nicht implementiert. Runtime-Version 2
-bleibt für bestehende Komponenten gültig, kann aber keine Client-
-Authentifizierung initialisieren; Version 3 verlangt die vollständige neue
+Credentials liefern dieselbe sichere Fehlerkategorie. Runtime-Version 2 bleibt
+für bestehende Komponenten gültig, kann aber keine Client-Authentifizierung
+oder ein Gateway initialisieren; Version 3 verlangt die vollständige neue
 Sektion und besitzt keine privilegierten Defaults.
+
+Runtime-`schema_version: 4` ergänzt die für den produktiven LLM-Pfad
+erforderlichen Request-, Lease- und Heartbeat-Zeitparameter. Das Gateway stellt
+derzeit genau `POST /v1/chat/completions` als geschlossene, nicht streamende
+OpenAI-kompatible Teilmenge bereit. Es authentifiziert und autorisiert vor jeder
+Nutzung, weist Überlast ohne Warteschlange ab, hält über Wake, Readiness und den
+gesamten Upstream-Aufruf eine persistente Lease und setzt ausschließlich die
+konfigurierte Provider-Authentifizierung. Request- und Response-Größen sowie
+Timeouts sind begrenzt; Redirects und Umgebungs-Proxies sind deaktiviert.
+Streaming und LLM-Telemetrie folgen in B.4 beziehungsweise B.5.
 
 ## SQLite-Persistenzfundament
 
 Runtime-`schema_version: 2` führte `persistence.database_path` als absoluten,
 extern vorgegebenen Dateipfad und den positiven, auf höchstens 60.000 ms
 begrenzten `persistence.busy_timeout_ms` mit 5.000 ms als Default ein. Die
-additive Version 3 übernimmt diesen Persistenzvertrag unverändert; die
-Persistenzschicht akzeptiert daher beide Versionen. Version 1 wird nicht
+additiven Versionen 3 und 4 übernehmen diesen Persistenzvertrag unverändert;
+die Persistenzschicht akzeptiert daher alle drei Versionen. Version 1 wird nicht
 automatisch aufgewertet. Der Datenbankpfad ist keine Bootstrap-Variable und
 wird intern erst nach vollständiger Konfigurations- und Secret-Validierung
 verwendet:

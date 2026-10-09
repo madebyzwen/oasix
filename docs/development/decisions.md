@@ -527,7 +527,7 @@ ausdrücklich noch nicht implementierte Entscheidungen.
 
 ## OASIX-DEC-020 – Additives Runtime-Schema 3 und Client-API-Authentifizierung
 
-- **Status:** In B.3.0 implementiert; unabhängige Review-Abnahme ausstehend
+- **Status:** In B.3.0 implementiert; in B.3.1 produktiv eingebunden
 - **Kontext:** SEC-01 verlangt Authentifizierung für Client- und Management-
   APIs sowie die Trennung unprivilegierter Inference-Nutzung von
   administrativen Power-Operationen. Runtime-Version 2 kennt ausschließlich
@@ -562,9 +562,45 @@ ausdrücklich noch nicht implementierte Entscheidungen.
   Referenzen und kontrollierte Neustarts; Hot Reload ist nicht implementiert.
   Die HMAC-Digests vermeiden langlebige Klartextwerte im Authenticator, ersetzen
   aber weder starke zufällige Schlüssel noch Dateirechte und sichere
-  Deployment-Prozesse. Persistence akzeptiert Version 2 und 3, weil deren
-  `persistence`-Vertrag identisch ist.
+  Deployment-Prozesse. Persistence akzeptiert Version 2, 3 und die additive
+  Version 4 aus OASIX-DEC-021, weil deren `persistence`-Vertrag identisch ist.
 - **Quellen:** Requirement CFG-01, CFG-03, SEC-01 bis SEC-03 und AC-10;
   [Phase B.3.0](phases/B3-client-auth.md),
   [Authentifizierung](../../src/oasix/auth/core.py),
   [Konfigurationsmodelle](../../src/oasix/config/models.py)
+
+## OASIX-DEC-021 – Lease-geschützter LLM-Gateway-Pfad
+
+- **Status:** In B.3.1 implementiert; unabhängige Review-Abnahme ausstehend
+- **Kontext:** Der produktive LLM-Pfad muss Client-Authentifizierung,
+  Concurrency, die autoritative persistente Lease, Wake/Readiness und den
+  Provideraufruf so komponieren, dass keine Worker-Nutzung ungeschützt oder
+  während einer offenen SQLite-Schreibtransaktion stattfindet.
+- **Gewählte Lösung:** Runtime-Schema 4 ergänzt verpflichtende Inference-
+  Zeitparameter. `POST /v1/chat/completions` authentifiziert genau einen
+  Bearer-Header, verlangt `inference`, reserviert ohne Warteschlange einen
+  prozesslokalen Concurrency-Slot, validiert einen auf 1 MiB begrenzten Request
+  und erwirbt danach eine persistente UUIDv4-Lease. Erst innerhalb dieser
+  Lease laufen Wake, Readiness und der konfigurierte LLM-Aufruf. Eine
+  Heartbeat-Task verlängert die Lease; Release und Slotfreigabe erfolgen erst
+  nach Ende der realen Nutzung. Jeder Datenbankschritt besitzt eine eigene
+  kurze Transaktion. Der HTTP-Transport deaktiviert Redirects und
+  Umgebungs-Proxies, begrenzt Zeit und Antwortgröße und validiert eine
+  geschlossene nicht streamende OpenAI-Teilmenge.
+- **Begründung:** Die feste Reihenfolge erfüllt SEC-01, AC-03 und LSE-01 bis
+  LSE-03, hält die Lease Registry als einzige Aktivitätsquelle und verhindert
+  unbeschränkte Warteschlangen. Eine neue Tabelle oder Migration ist dafür
+  nicht erforderlich.
+- **Berücksichtigte Alternativen:** Ungeschützter Betrieb mit Runtime-Version 2,
+  In-Memory-Leases, parallele Aktivitätszähler, Netzwerk-I/O in einer
+  Schreibtransaktion, Weitergabe von Client-Credentials, automatische
+  Redirects und ungeprüfte offene OpenAI-Payloads wurden ausgeschlossen.
+- **Konsequenzen und Trade-offs:** B.3.1 unterstützt genau einen aktivierten,
+  frei benannten Service mit `kind: llm` und zunächst nur nicht streamende
+  Chat Completions. Das Concurrency-Limit gilt pro Prozess; der SQLite-MVP
+  setzt daher einen Gateway-Prozess voraus. Streaming und dessen vollständige
+  Cancellation-Semantik folgen in B.4, sichere operative Telemetrie in B.5.
+- **Quellen:** Requirement SEC-01 bis SEC-03, LSE-01 bis LSE-03, AC-03 und
+  AC-10; [Phase B.3.1](phases/B3-llm-proxy.md),
+  [Gateway](../../src/oasix/llm/gateway.py),
+  [Lease-Adapter](../../src/oasix/llm/leases.py)

@@ -129,6 +129,17 @@ def auth_config_data(valid_config_data: dict[str, Any]) -> dict[str, Any]:
 
 
 @pytest.fixture
+def gateway_config_data(auth_config_data: dict[str, Any]) -> dict[str, Any]:
+    auth_config_data["schema_version"] = 4
+    auth_config_data["policies"]["inference"] = {
+        "request_timeout_seconds": 30,
+        "lease_ttl_seconds": 10,
+        "heartbeat_interval_seconds": 2.0,
+    }
+    return auth_config_data
+
+
+@pytest.fixture
 def secret_directory(tmp_path: Path) -> Path:
     directory = tmp_path / "secrets"
     directory.mkdir()

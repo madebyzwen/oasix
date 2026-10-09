@@ -1,35 +1,32 @@
-# Phase B.3 – OpenAI-kompatibler LLM-Proxy: Abhängigkeitsnachweis
+# Phase B.3 – Historischer Abhängigkeitsnachweis
 
-Status: vor Proxy-Implementierung blockiert
+Status: Blocker durch C.1 und B.3.0 aufgelöst; B.3.1 implementiert
 
 ## 1. Ziel und Abgrenzung
 
 B.3 soll einen authentifizierten OpenAI-kompatiblen LLM-Pfad unter stabilen
-`/v1/...`-Endpunkten bereitstellen. Die verpflichtende Vorprüfung hat ergeben,
-dass eine sichere produktive Implementierung auf dem aktuellen Stand nicht
-möglich ist. Deshalb wurden weder API-, Proxy- noch LLM-Transportcode begonnen.
+`/v1/...`-Endpunkten bereitstellen. Die ursprüngliche Vorprüfung hatte den
+fehlenden persistenten Lease-Lifecycle und die fehlende Client-
+Authentifizierung als zwingende Blocker festgestellt. C.1 und B.3.0 haben
+diese Voraussetzungen inzwischen geschaffen. B.3.1 implementiert ihre sichere
+Komposition und ist in [Phase B.3.1](B3-llm-proxy.md) dokumentiert.
 
-B.1 und B.2 bleiben als eigenständig geprüfte Commits erhalten. B.4 Streaming
-und B.5 Telemetrie wurden gemäß der sequenziellen Stop-Regel nicht begonnen.
+B.1 und B.2 bleiben als eigenständig geprüfte Commits erhalten. Dieses Dokument
+bleibt als historischer Entscheidungsnachweis bestehen und beschreibt nicht
+mehr den aktuellen Implementierungsstatus.
 
-## 2. Verbindliche Anforderungen und Blocker
+## 2. Aufgelöste Blocker
 
-| Anforderung | Aktueller Stand und Blocker |
+| Anforderung | Auflösung |
 | --- | --- |
-| LSE-01 bis LSE-03 | C.1 implementiert den unabhängig geprüften persistenten Acquire-/Heartbeat-/Release-Lifecycle ohne Schemaänderung. Die Einbindung in den vollständigen B.3-Anfrageablauf ist nicht implementiert. |
-| SEC-01 | B.3.0 implementiert einen eigenständigen Client-Key- und Berechtigungsvertrag für zukünftige `/v1/...`- und Management-Routen. Der Baustein ist bis zum unabhängigen Review unfreigegeben und noch in keine HTTP-Route integriert. |
-| AC-03 | Wake und Readiness sind in B.2 vorhanden. Die anschließende Weiterleitung darf jedoch erst innerhalb einer gültigen Lease stattfinden. |
-| SEC-02, SEC-03, AC-10 | Provider-Credentials können sicher aufgelöst werden, dürfen aber erst in einem vollständig lease- und auth-geschützten Proxy genutzt werden. |
+| LSE-01 bis LSE-03 | C.1 implementiert den unabhängig geprüften persistenten Acquire-/Heartbeat-/Release-Lifecycle ohne Schemaänderung. B.3.1 bindet ihn vor Wake, Readiness und Upstream ein. |
+| SEC-01 | B.3.0 stellt die getrennte Client-Authentifizierung und Berechtigungsprüfung bereit. B.3.1 wendet sie auf jede implementierte Inference-Route an. |
+| AC-03 | B.1/B.2 stellen Wake und Readiness bereit. B.3.1 führt beide ausschließlich innerhalb einer gültigen Lease aus. |
+| SEC-02, SEC-03, AC-10 | B.3.1 nutzt Provider-Credentials nur am konfigurierten Upstream und gibt sie weder an Clients noch an Fehler oder Logs weiter. |
 
-Der in C.1 implementierte `LeaseLifecycle` definiert atomare Acquire-Semantik,
-Heartbeat/Renew, idempotente Freigabe und Expiry-Auswertung. B.3.0 definiert
-davon getrennt Bearer-Authentifizierung und explizite Inference-/
-Administrationsrechte. Beide Bausteine lösen noch nicht ihre sichere Komposition
-mit Streaming-, Abbruch- oder Upstream-Fehlerpfaden.
+## 3. Umgesetzte Architekturentscheidungen
 
-## 3. Erforderliche Architekturentscheidungen vor Fortsetzung
-
-Vor B.3 müssen mindestens folgende Verträge festgelegt und implementiert sein:
+Vor B.3.1 waren folgende Verträge festzulegen und zu implementieren:
 
 1. Die transaktionale Lease-Komponente ist in C.1 implementiert und unabhängig
    freigegeben.
@@ -37,9 +34,8 @@ Vor B.3 müssen mindestens folgende Verträge festgelegt und implementiert sein:
    Concurrency-Gate, Lease-Acquire vor Wake/Readiness/Upstream-Nutzung,
    Heartbeat während langer Nutzung und Freigabe erst nach vollständigem Ende
    beziehungsweise kontrollierter Fehler- oder Abbruchbehandlung.
-3. Der externe Secret- und Berechtigungsvertrag ist in B.3.0 implementiert,
-   muss aber vor produktiver B.3-Nutzung unabhängig freigegeben und an der
-   späteren HTTP-Grenze konsequent auf jede Operation angewandt werden.
+3. Der externe Secret- und Berechtigungsvertrag aus B.3.0 wird an der
+   HTTP-Grenze konsequent auf jede Operation angewandt.
 4. C.1 hat bestätigt, dass die vorhandenen Lease-Spalten für den ersten
    Lifecycle ausreichen; es ist keine Migration erforderlich.
 
@@ -53,42 +49,34 @@ Der ursprüngliche Stopp folgt direkt aus v3.4 und der bestehenden
 [OASIX-DEC-019](../decisions.md#oasix-dec-019--persistenter-idempotenter-lease-lifecycle)
 entscheidet den Lease-Vertrag;
 [OASIX-DEC-020](../decisions.md#oasix-dec-020--additives-runtime-schema-3-und-client-api-authentifizierung)
-entscheidet den Client-Authentifizierungsvertrag. Die B.3-spezifische
-Ablaufkomposition bleibt offen.
+entscheidet den Client-Authentifizierungsvertrag.
+[OASIX-DEC-021](../decisions.md#oasix-dec-021--lease-geschützter-llm-gateway-pfad)
+dokumentiert die inzwischen implementierte B.3.1-Ablaufkomposition.
 
 ## 5. Umsetzung
 
-Für den B.3-Proxy wurden weiterhin keine Python-Dateien, Tests, Dependencies,
-API-Routen, Datenbankmodelle oder Migrationen angelegt beziehungsweise
-verändert. Der getrennte B.3.0-Baustein ist in
-[Phase B.3.0](B3-client-auth.md) dokumentiert. Dieses Dokument hält weiterhin
-den verbleibenden Stopp vor der Proxy-Implementierung fest.
+Die aktuelle Implementierung und ihre Grenzen stehen ausschließlich in
+[Phase B.3.1](B3-llm-proxy.md). Der Authentifizierungsbaustein bleibt getrennt
+in [Phase B.3.0](B3-client-auth.md) dokumentiert. B.3.1 benötigt weder neue
+Datenbanktabellen noch eine Migration.
 
 ## 6. Tests und Nachweise
 
-Nachweise für den Authentifizierungsbaustein stehen in
-[Phase B.3.0](B3-client-auth.md). Für den eigentlichen B.3-Proxy existieren
-weiterhin keine Implementierungstests, weil keine Produktivimplementierung
-begonnen wurde.
+Nachweise für Authentifizierung und Proxy stehen in
+[Phase B.3.0](B3-client-auth.md) und [Phase B.3.1](B3-llm-proxy.md).
 
-## 7. Risiken bei Missachtung des Stopps
+## 7. Weiterhin geltende Invarianten
 
-- Ein LLM-Request könnte den Worker ohne maßgebliche aktive Lease nutzen und
-  damit Automatic Sleep nicht sicher blockieren.
-- Bei Streaming oder Client-Abbruch könnte die Nutzung zu früh freigegeben oder
-  dauerhaft verwaist bleiben.
-- Eine HTTP-Schicht, die den B.3.0-Baustein nicht vor jeder Operation anwendet,
-  würde SEC-01 unmittelbar verletzen.
-- Ein provisorischer Aktivitätszähler würde der alleinigen Autorität der Lease
-  Registry widersprechen und später konkurrierende Zustände erzeugen.
+- Keine Worker-Nutzung ohne maßgebliche aktive Lease.
+- Keine Freigabe vor dem tatsächlichen Ende der Upstream-Nutzung.
+- Authentifizierung und explizite Inference-Berechtigung vor jeder Operation.
+- Keine provisorischen Aktivitätszähler neben der Lease Registry.
 
 ## 8. Abnahmestatus
 
-B.3 ist nicht implementiert und nicht zur Abnahme bereit. C.1 beseitigt den
-Lease-Lifecycle-Teil des Blockers. B.3.0 stellt die Client-Authentifizierung
-bereit, bleibt aber bis zum unabhängigen Review unfreigegeben. Danach ist vor
-dem Proxy-Code weiterhin die sichere B.3-Ablaufkomposition festzulegen. B.4
-und B.5 sind nicht begonnen.
+Der hier dokumentierte Blocker ist aufgelöst. Der aktuelle Implementierungs-
+und Abnahmestatus steht in [Phase B.3.1](B3-llm-proxy.md). B.4 und B.5 sind zu
+diesem Stand nicht implementiert.
 
 ## 9. GitHub-Referenzen
 
@@ -98,8 +86,7 @@ und B.5 sind nicht begonnen.
 - Abgeschlossene C.1-Commits:
   [`017c94d`](https://github.com/madebyzwen/oasix/commit/017c94dda1a1cc4ff12db065edce124801704287),
   [`811afd3`](https://github.com/madebyzwen/oasix/commit/811afd3ec901e86990fbb0895757291063ba64ce)
-- B.3.0: Commit `feat(auth): add client API authentication and authorization`
-  in PR #6; unabhängige Prüfung ausstehend
+- B.3.0: [`846c3cb`](https://github.com/madebyzwen/oasix/commit/846c3cbbe95306ab3705bb641bdf9c67da35b396)
 - Pull Request: [PR #6](https://github.com/madebyzwen/oasix/pull/6), offen und
   nicht gemergt
 - CI: [Linux-CI](https://github.com/madebyzwen/oasix/actions/runs/38002248222)

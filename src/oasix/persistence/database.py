@@ -124,9 +124,9 @@ def initialize_persistence(
 ) -> PersistenceDatabase:
     """Validate storage and initialize one fully verified SQLite engine."""
 
-    if runtime.schema_version not in {2, 3}:
+    if runtime.schema_version not in {2, 3, 4}:
         raise PersistenceConfigurationError(
-            "Persistenzinitialisierung erfordert Runtime-Konfiguration Version 2 oder 3."
+            "Persistenzinitialisierung erfordert Runtime-Konfiguration Version 2, 3 oder 4."
         )
     prepared = prepare_database_path(runtime.persistence, bootstrap)
     database, status = _initialize_database(prepared, runtime.persistence.busy_timeout_ms)

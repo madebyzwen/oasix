@@ -46,10 +46,12 @@ def test_repository_example_is_a_valid_runtime_configuration(
         )
     )
 
-    assert loaded.runtime.schema_version == 3
+    assert loaded.runtime.schema_version == 4
     assert loaded.runtime.active_worker == "worker-primary"
     assert loaded.runtime.client_auth is not None
     assert len(loaded.runtime.client_auth.clients) == 2
+    assert loaded.runtime.policies.inference is not None
+    assert loaded.runtime.policies.inference.heartbeat_interval_seconds == 20.0
     assert len(loaded.secrets) == 6
 
 

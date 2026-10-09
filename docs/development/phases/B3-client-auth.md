@@ -1,6 +1,6 @@
 # Phase B.3.0 – Client-API-Authentifizierung und Berechtigungsmodell
 
-Status: implementiert, unabhängige Review-Abnahme ausstehend
+Status: abgeschlossen und als Grundlage von B.3.1 freigegeben
 
 ## 1. Ziel und Abgrenzung
 
@@ -162,18 +162,19 @@ verwenden weder Netzwerk noch externe Identitätsanbieter.
   direkte Existenzoffenlegung. Allgemeine Laufzeit-Seitenkanäle eines
   Python-Prozesses werden nicht als kryptografisch vollständig ausgeschlossen
   behauptet.
-- B.3 muss Authentifizierung, Concurrency-Gate, Lease, Wake/Readiness,
-  Upstream-Nutzung und sämtliche Abbruch-/Fehlerpfade noch sicher komponieren.
+- B.3.1 komponiert Authentifizierung, Concurrency-Gate, Lease, Wake/Readiness,
+  Upstream-Nutzung und die nicht streamenden Abbruch-/Fehlerpfade. Streaming-
+  spezifische Grenzen folgen in B.4.
 
 ## 8. Abnahmestatus
 
-B.3.0 ist implementiert und lokal getestet, bleibt aber bis zum unabhängigen
-GitHub-Code-Review unfreigegeben. Weder der produktive B.3-Proxy noch B.4 oder
-B.5 wurden begonnen.
+B.3.0 ist implementiert und als Grundlage des B.3.1-Gateways freigegeben.
+B.3.1 nutzt den Baustein produktiv; B.4 und B.5 sind zu diesem Stand nicht
+implementiert.
 
 ## 9. GitHub-Referenzen
 
-- Implementierung: Commit `feat(auth): add client API authentication and authorization`
+- Implementierung: [Commit `846c3cb`](https://github.com/madebyzwen/oasix/commit/846c3cbbe95306ab3705bb641bdf9c67da35b396)
   in [PR #6](https://github.com/madebyzwen/oasix/pull/6)
 - Pull Request: [PR #6](https://github.com/madebyzwen/oasix/pull/6), offen und
   nicht gemergt

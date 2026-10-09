@@ -37,6 +37,7 @@ type PositiveMultiplier = Annotated[StrictFloat, Field(ge=1.0)]
 type JitterRatio = Annotated[StrictFloat, Field(ge=0.0, le=1.0)]
 type StatusCode = Annotated[StrictInt, Field(ge=100, le=599)]
 type BusyTimeoutMilliseconds = Annotated[StrictInt, Field(ge=1, le=60_000)]
+type PositiveInterval = Annotated[StrictFloat, Field(gt=0.0)]
 
 
 class StrictModel(BaseModel):
@@ -318,12 +319,27 @@ class ConcurrencyLimits(StrictModel):
     max_concurrent_inference_requests: PositiveLimit
 
 
+class InferencePolicy(StrictModel):
+    """Bounded request and persistent lease timing for interactive inference."""
+
+    request_timeout_seconds: PositiveSeconds
+    lease_ttl_seconds: PositiveSeconds
+    heartbeat_interval_seconds: PositiveInterval
+
+    @model_validator(mode="after")
+    def require_heartbeat_before_expiry(self) -> InferencePolicy:
+        if self.heartbeat_interval_seconds >= self.lease_ttl_seconds:
+            raise ValueError("lease heartbeat interval must be shorter than its TTL")
+        return self
+
+
 class Policies(StrictModel):
     idle_timeout_seconds: PositiveSeconds
     readiness_timeout_seconds: PositiveSeconds
     force_sleep_grace_period_seconds: NonNegativeSeconds
     retry: RetryPolicies
     concurrency: ConcurrencyLimits
+    inference: InferencePolicy | None = None
 
 
 class PersistenceSettings(StrictModel):
@@ -343,7 +359,7 @@ class PersistenceSettings(StrictModel):
 class RuntimeConfig(StrictModel):
     """Fully validated runtime behavior; no bootstrap source locations are included."""
 
-    schema_version: Literal[2, 3]
+    schema_version: Literal[2, 3, 4]
     active_worker: Identifier
     workers: Annotated[Mapping[Identifier, WorkerProfile], Field(min_length=1)]
     policies: Policies
@@ -365,8 +381,12 @@ class RuntimeConfig(StrictModel):
     def require_versioned_client_auth(self) -> RuntimeConfig:
         if self.schema_version == 2 and self.client_auth is not None:
             raise ValueError("client_auth requires runtime schema version 3")
-        if self.schema_version == 3 and self.client_auth is None:
-            raise ValueError("runtime schema version 3 requires client_auth")
+        if self.schema_version in {3, 4} and self.client_auth is None:
+            raise ValueError("runtime schema version 3 or 4 requires client_auth")
+        if self.schema_version in {2, 3} and self.policies.inference is not None:
+            raise ValueError("inference policy requires runtime schema version 4")
+        if self.schema_version == 4 and self.policies.inference is None:
+            raise ValueError("runtime schema version 4 requires inference policy")
         return self
 
     @model_validator(mode="after")

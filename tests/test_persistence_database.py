@@ -87,6 +87,18 @@ def test_persistence_accepts_additive_runtime_schema_version_three(
     database.close()
 
 
+def test_persistence_accepts_additive_runtime_schema_version_four(
+    gateway_config_data: dict[str, Any],
+    tmp_path: Path,
+    secret_directory: Path,
+) -> None:
+    database = initialize_persistence(
+        _runtime(gateway_config_data),
+        _bootstrap(tmp_path, secret_directory),
+    )
+    database.close()
+
+
 def test_missing_sqlite_json_function_fails_closed(
     valid_config_data: dict[str, Any],
     tmp_path: Path,

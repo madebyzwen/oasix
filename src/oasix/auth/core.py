@@ -116,7 +116,7 @@ def _create_client_authenticator(
     runtime: RuntimeConfig,
     resolved_secrets: ResolvedSecrets,
 ) -> ClientAuthenticator:
-    if runtime.schema_version != 3 or runtime.client_auth is None:
+    if runtime.schema_version not in {3, 4} or runtime.client_auth is None:
         raise ClientAuthConfigurationError
 
     pepper = system_secrets.token_bytes(32)

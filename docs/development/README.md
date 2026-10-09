@@ -26,7 +26,8 @@ Vorgaben konkreten Implementierungsphasen zu und unterscheiden dabei zwischen:
 - [Phase B.1 – HTTP-Service-Readiness](phases/B1-http-readiness.md)
 - [Phase B.2 – Wake-on-LAN und Bereitschaft](phases/B2-wake-readiness.md)
 - [Phase B.3.0 – Client-API-Authentifizierung](phases/B3-client-auth.md)
-- [Phase B.3 – LLM-Proxy-Abhängigkeiten](phases/B3-llm-proxy-blocked.md)
+- [Phase B.3.1 – Nicht streamender LLM-Proxy](phases/B3-llm-proxy.md)
+- [Historischer B.3-Abhängigkeitsnachweis](phases/B3-llm-proxy-blocked.md)
 - [Phase C.1 – Persistenter Lease-Lifecycle](phases/C1-lease-lifecycle.md)
 - [Vorlage für zukünftige Phasen](templates/phase-template.md)
 
@@ -49,14 +50,14 @@ B.1 implementiert den produktiven asynchronen HTTP-Readiness-Adapter, B.2 die
 konfigurierte Wake-on-LAN-Ausführung und eine begrenzte servicebezogene
 Bereitschaftsorchestrierung für den aktiven Worker. Beide Umfänge sind
 unabhängig geprüft und abgeschlossen.
-LLM-Proxy, Streaming und LLM-Telemetrie bleiben den folgenden B-Teilphasen
-vorbehalten. C.1 ist als persistenter Lease-Lifecycle unabhängig geprüft und
-abgeschlossen. B.3.0 implementiert ein davon getrenntes, transportneutrales
-Client-API-Authentifizierungs- und Berechtigungsfundament, bleibt aber bis zum
-unabhängigen Review unfreigegeben. B.3 ist noch nicht begonnen: Insbesondere
-die sichere Ablaufkomposition aus Authentifizierung, Concurrency, Lease,
-Wake/Readiness und Upstream-Nutzung bleibt offen. B.4 und B.5 wurden nicht
-begonnen.
+C.1 ist als persistenter Lease-Lifecycle unabhängig geprüft und abgeschlossen;
+B.3.0 stellt das getrennte Client-API-Authentifizierungs- und
+Berechtigungsfundament bereit. B.3.1 implementiert darauf den nicht streamenden
+`POST /v1/chat/completions`-Pfad mit Authentifizierung, begrenzter Concurrency,
+persistenter Lease samt Heartbeat, Wake/Readiness und abgesichertem Upstream-
+Transport. B.3.1 bleibt bis zum unabhängigen Review unfreigegeben. Streaming
+und LLM-Telemetrie folgen in B.4 und B.5 und sind zu diesem Stand nicht
+implementiert.
 
 ## Pflegeregeln
 

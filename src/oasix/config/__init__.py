@@ -12,6 +12,7 @@ from oasix.config.models import (
     ClientAuthenticationSettings,
     ClientIdentitySettings,
     ClientPermission,
+    InferencePolicy,
     PersistenceSettings,
     RuntimeConfig,
 )
@@ -23,6 +24,7 @@ __all__ = [
     "ClientAuthenticationSettings",
     "ClientIdentitySettings",
     "ClientPermission",
+    "InferencePolicy",
     "LoadedConfiguration",
     "PersistenceSettings",
     "ResolvedSecrets",
