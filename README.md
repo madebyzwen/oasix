@@ -126,3 +126,42 @@ Die vollständigen Architektur-, Sicherheits- und Akzeptanzanforderungen stehen
 im [OASIX Technical Requirement v3.4](docs/OASIX_Technical_Requirement_Reviewed_v3.4.docx).
 Es ist die einzige verbindliche Architekturgrundlage. Ergänzende Regeln für
 Änderungen in diesem Repository enthält [AGENTS.md](AGENTS.md).
+
+## Konfigurationsfundament
+
+Die Control Plane lädt ihre Bootstrap-Informationen ausschließlich aus der
+Umgebung. `OASIX_CONFIG_FILE` verweist auf die externe Runtime-Konfiguration;
+`OASIX_SECRETS_DIRECTORY` verweist auf das externe Secret-Verzeichnis und hat
+den Standardwert `/run/secrets`. Worker, Services, Power-Methoden und Policies
+werden nicht über Bootstrap-Variablen definiert, sondern ausschließlich über
+die vollständig validierte YAML-Konfiguration. Fremde Umgebungsvariablen werden
+ignoriert; unbekannte Namen im reservierten Präfix `OASIX_` verhindern dagegen
+den Start, ohne den unbekannten Namen in der Fehlermeldung wiederzugeben.
+
+Eine neutrale Vorlage liegt unter
+[`config/oasix.example.yaml`](config/oasix.example.yaml). Sie enthält nur
+Secret-Referenzen und reservierte `.invalid`-Domains. Eine Anwendung lädt die
+Konfiguration vor dem Aufbau weiteren Zustands atomar:
+
+```python
+from oasix.config import load_startup_configuration
+
+configuration = load_startup_configuration()
+```
+
+Fehlende Pflichtfelder, unbekannte Felder, ungültige Policies und nicht
+auflösbare Secrets verhindern den Start. Secret-Inhalte werden in
+Fehlermeldungen und Debug-Repräsentationen nicht ausgegeben.
+
+Secret-Dateien werden relativ zu einem geöffneten Verzeichnis-Descriptor
+geöffnet. Anschließend werden Typ, kanonischer Pfad sowie Device- und Inode-ID
+des tatsächlich geöffneten Datei-Descriptors geprüft, bevor aus genau diesem
+Descriptor gelesen wird. Linux verwendet dafür `/proc/self/fd`, macOS
+`F_GETPATH`; kann der geöffnete Pfad nicht sicher bestimmt werden, schlägt der
+Start geschlossen fehl.
+
+Die Descriptor-Prüfung verhindert keinen in-place Schreibzugriff auf eine
+bereits geöffnete Datei. Das Secret-Verzeichnis und seine Dateien müssen daher
+für die Control Plane und nicht vertrauenswürdige Prozesse unveränderlich sein
+und sollen im Deployment read-only mit restriktiven Berechtigungen
+bereitgestellt werden.

@@ -1,0 +1,79 @@
+schema_version: 1
+active_worker: worker-primary
+
+workers:
+  worker-primary:
+    connection:
+      host: compute-worker.example.invalid
+      ssh:
+        port: 22
+        user: worker-service
+        private_key:
+          source: file
+          name: worker_ssh_key
+        known_hosts:
+          source: file
+          name: worker_known_hosts
+    power:
+      wake:
+        method: wol
+        mac_address: "02:00:00:00:00:01"
+        broadcast_host: wake-network.example.invalid
+        port: 9
+      sleep:
+        method: ssh_command
+        command:
+          - systemctl
+          - suspend
+    services:
+      llm:
+        kind: llm
+        enabled: true
+        endpoint: http://llm.compute-worker.example.invalid:8080
+        auth:
+          method: bearer
+          secret:
+            source: file
+            name: llm_api_token
+        readiness:
+          type: http
+          method: GET
+          path: /v1/models
+          expected_status_codes: [200]
+      agent-runtime:
+        kind: agent
+        enabled: false
+        endpoint: http://agents.compute-worker.example.invalid:8100
+        capabilities:
+          - research
+          - documentation
+          - coding
+        auth:
+          method: none
+        readiness:
+          type: http
+          method: GET
+          path: /health
+          expected_status_codes: [200]
+
+policies:
+  idle_timeout_seconds: 3600
+  readiness_timeout_seconds: 300
+  force_sleep_grace_period_seconds: 60
+  retry:
+    job:
+      max_attempts: 3
+      initial_delay_seconds: 5.0
+      multiplier: 2.0
+      max_delay_seconds: 60.0
+      jitter:
+        ratio: 0.2
+    wake:
+      max_attempts: 3
+      initial_delay_seconds: 10.0
+      multiplier: 2.0
+      max_delay_seconds: 120.0
+      jitter: null
+  concurrency:
+    max_concurrent_jobs: 1
+    max_concurrent_inference_requests: 2
