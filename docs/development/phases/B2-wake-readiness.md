@@ -1,6 +1,6 @@
 # Phase B.2 – Wake-on-LAN und Worker-Bereitschaft
 
-Status: implementiert, unabhängige Review-Abnahme ausstehend
+Status: abgeschlossen und unabhängig geprüft
 
 ## 1. Ziel und Abgrenzung
 
@@ -106,9 +106,8 @@ weder echte Broadcast-Pakete noch produktive HTTP-Anfragen gesendet.
 
 ## 8. Abnahmestatus
 
-B.2 ist implementiert und lokal vollständig geprüft, aber bis zum unabhängigen
-Code-Review nicht freigegeben. B.3 bis B.5 wurden in diesem Commit nicht
-begonnen.
+B.2 ist implementiert, lokal vollständig geprüft und unabhängig freigegeben.
+B.3 bis B.5 wurden in diesem Commit nicht begonnen.
 
 ## 9. GitHub-Referenzen
 

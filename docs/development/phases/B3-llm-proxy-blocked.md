@@ -1,6 +1,6 @@
 # Phase B.3 – OpenAI-kompatibler LLM-Proxy: Abhängigkeitsnachweis
 
-Status: vor Implementierung blockiert
+Status: vor Implementierung weiter blockiert
 
 ## 1. Ziel und Abgrenzung
 
@@ -16,24 +16,22 @@ und B.5 Telemetrie wurden gemäß der sequenziellen Stop-Regel nicht begonnen.
 
 | Anforderung | Aktueller Stand und Blocker |
 | --- | --- |
-| LSE-01 bis LSE-03 | Jede produktive LLM-Nutzung benötigt eine persistente Lease mit TTL beziehungsweise Heartbeat. Das Schema existiert, aber es gibt keinen fachlichen Acquire-/Heartbeat-/Release-Lifecycle. |
+| LSE-01 bis LSE-03 | C.1 implementiert den persistenten Acquire-/Heartbeat-/Release-Lifecycle ohne Schemaänderung. Die unabhängige Freigabe steht noch aus; die Einbindung in den vollständigen B.3-Anfrageablauf ist nicht implementiert. |
 | SEC-01 | Client-APIs benötigen Authentifizierung. Die Runtime-Konfiguration enthält derzeit nur Provider-/Service-Credentials, aber keinen Client-Key- oder Berechtigungsvertrag für `/v1/...`. |
 | AC-03 | Wake und Readiness sind in B.2 vorhanden. Die anschließende Weiterleitung darf jedoch erst innerhalb einer gültigen Lease stattfinden. |
 | SEC-02, SEC-03, AC-10 | Provider-Credentials können sicher aufgelöst werden, dürfen aber erst in einem vollständig lease- und auth-geschützten Proxy genutzt werden. |
 
-`LeasesRepository` dokumentiert seinen aktuellen Umfang selbst als Erzeugung
-und Lesen; Lifecycle-Operationen bleiben einer späteren Phase vorbehalten. Das
-direkte Anlegen einer Zeile über `add()` ist kein hinreichender Ersatz: Es
-definiert weder atomare Acquire-Semantik noch Heartbeat, idempotente Freigabe,
-Expiry-Behandlung oder Fehler-/Abbruchpfade.
+Der in C.1 implementierte `LeaseLifecycle` definiert atomare Acquire-Semantik,
+Heartbeat/Renew, idempotente Freigabe und Expiry-Auswertung. Er löst nicht den
+Client-Authentifizierungsvertrag und noch nicht die Einbindung in Streaming-,
+Abbruch- oder Upstream-Fehlerpfade.
 
 ## 3. Erforderliche Architekturentscheidungen vor Fortsetzung
 
 Vor B.3 müssen mindestens folgende Verträge festgelegt und implementiert sein:
 
-1. Eine transaktionale Lease-Komponente für Acquire, Heartbeat und Release mit
-   UTC-/TTL-Regeln, sicheren Owner-/Purpose-Werten und eindeutiger Behandlung
-   abgelaufener beziehungsweise bereits freigegebener Leases.
+1. Die transaktionale Lease-Komponente ist in C.1 implementiert und muss vor
+   produktiver B.3-Nutzung unabhängig freigegeben werden.
 2. Die Reihenfolge für interaktive LLM-Anfragen: Authentifizierung und
    Concurrency-Gate, Lease-Acquire vor Wake/Readiness/Upstream-Nutzung,
    Heartbeat während langer Nutzung und Freigabe erst nach vollständigem Ende
@@ -41,19 +39,19 @@ Vor B.3 müssen mindestens folgende Verträge festgelegt und implementiert sein:
 3. Ein externer Secret- und Berechtigungsvertrag für Client-API-Schlüssel. Ein
    unprivilegierter Inference-Key darf keine administrativen Power-Aktionen
    autorisieren. Provider-Credentials und Client-Credentials bleiben getrennt.
-4. Festlegung, ob die vorhandenen Lease-Spalten für den ersten Lifecycle
-   ausreichen. Falls eine Migration erforderlich wird, benötigt sie vorab einen
-   freigegebenen Fachvertrag.
+4. C.1 hat bestätigt, dass die vorhandenen Lease-Spalten für den ersten
+   Lifecycle ausreichen; es ist keine Migration erforderlich.
 
 Diese Punkte dürfen nicht durch einen flüchtigen Aktivitätszähler, eine
 In-Memory-Dummy-Lease oder einen ungeschützten Proxy ersetzt werden.
 
 ## 4. Entscheidungen
 
-Es wurde keine neue Architekturentscheidung getroffen. Der Stopp folgt direkt
-aus v3.4 und der bestehenden
+Der ursprüngliche Stopp folgt direkt aus v3.4 und der bestehenden
 [OASIX-DEC-010](../decisions.md#oasix-dec-010--persistenzgrenzen-und-lease-autorität).
-Die offenen Verträge müssen vor der Fortsetzung separat freigegeben werden.
+[OASIX-DEC-019](../decisions.md#oasix-dec-019--persistenter-idempotenter-lease-lifecycle)
+entscheidet inzwischen den Lease-Vertrag. Client-Authentifizierung und die
+B.3-spezifische Ablaufkomposition bleiben offen.
 
 ## 5. Umsetzung
 
@@ -83,8 +81,9 @@ Produktivimplementierung begonnen wurde.
 
 ## 8. Abnahmestatus
 
-B.3 ist nicht implementiert und nicht zur Abnahme bereit. Die Arbeit wurde vor
-produktiven Änderungen kontrolliert gestoppt. B.4 und B.5 sind nicht begonnen.
+B.3 ist nicht implementiert und nicht zur Abnahme bereit. C.1 beseitigt den
+Lease-Lifecycle-Teil des Blockers nach noch ausstehendem Review; die
+Client-Authentifizierung blockiert weiterhin. B.4 und B.5 sind nicht begonnen.
 
 ## 9. GitHub-Referenzen
 

@@ -5,10 +5,17 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from functools import wraps
 
-from sqlalchemy import select
+from sqlalchemy import case, select, update
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
-from oasix.persistence.errors import PersistenceError, PersistenceIntegrityError
+from oasix.persistence.errors import (
+    LeaseConflictError,
+    LeaseInactiveError,
+    LeaseNotFoundError,
+    PersistenceError,
+    PersistenceIntegrityError,
+)
 from oasix.persistence.migrations import verify_schema_revision
 from oasix.persistence.models import Attempt, ControlState, Job, JobEvent, Lease, WorkerState
 from oasix.persistence.validation import RepositoryValidation
@@ -114,7 +121,7 @@ class AttemptsRepository(_Repository):
 
 
 class LeasesRepository(_Repository):
-    """Create and retrieve leases; lifecycle operations remain a later phase."""
+    """Persist atomic lease lifecycle operations in the caller's transaction."""
 
     def get(self, lease_id: str) -> Lease | None:
         return self._session.get(Lease, lease_id)
@@ -122,6 +129,117 @@ class LeasesRepository(_Repository):
     @_redact_repository_traceback
     def add(self, data: Mapping[str, object]) -> Lease:
         values = self._validation.lease(data)
+        self._require_references(values)
+        entity = Lease(**values)
+        self._session.add(entity)
+        return entity
+
+    @_redact_repository_traceback
+    def acquire(self, data: Mapping[str, object], *, observed_at: int) -> Lease:
+        """Insert once, or return the same still-active lease identity."""
+
+        values = self._validation.lease(data)
+        observation = self._validation.lease_observation(
+            {"lease_id": values["lease_id"], "observed_at": observed_at}
+        )
+        self._require_references(values)
+        statement = (
+            sqlite_insert(Lease)
+            .values(**values)
+            .on_conflict_do_nothing(index_elements=[Lease.lease_id])
+        )
+        result = self._session.execute(statement)
+        entity = self._session.get(Lease, values["lease_id"], populate_existing=True)
+        if entity is None:
+            raise LeaseNotFoundError("Lease konnte nicht sicher gelesen werden.")
+        if result.rowcount == 1:
+            return entity
+        if not _same_lease_contract(entity, values):
+            raise LeaseConflictError("Lease-Vertrag steht in Konflikt mit dem Bestand.")
+        if entity.created_at > observation["observed_at"]:
+            raise LeaseConflictError("Lease-Zeitbasis steht in Konflikt mit dem Bestand.")
+        if entity.released_at is not None or entity.expires_at <= observation["observed_at"]:
+            raise LeaseInactiveError("Inaktive Lease darf nicht erneut aktiviert werden.")
+        return entity
+
+    @_redact_repository_traceback
+    def renew(self, data: Mapping[str, object]) -> Lease:
+        """Extend one active lease without reviving it or moving time backwards."""
+
+        values = self._validation.lease_renewal(data)
+        heartbeat_at = values["last_heartbeat_at"]
+        statement = (
+            update(Lease)
+            .where(
+                Lease.lease_id == values["lease_id"],
+                Lease.released_at.is_(None),
+                Lease.expires_at > heartbeat_at,
+                Lease.last_heartbeat_at <= heartbeat_at,
+            )
+            .values(
+                last_heartbeat_at=heartbeat_at,
+                expires_at=case(
+                    (Lease.expires_at < values["expires_at"], values["expires_at"]),
+                    else_=Lease.expires_at,
+                ),
+            )
+        )
+        result = self._session.execute(statement)
+        if result.rowcount != 1:
+            self._raise_renewal_failure(values["lease_id"], heartbeat_at)
+        entity = self._session.get(Lease, values["lease_id"], populate_existing=True)
+        if entity is None:
+            raise LeaseNotFoundError("Lease wurde nicht gefunden.")
+        return entity
+
+    @_redact_repository_traceback
+    def release(self, data: Mapping[str, object]) -> Lease:
+        """Release once and preserve the first release timestamp and reason."""
+
+        values = self._validation.lease_release(data)
+        existing = self.get(values["lease_id"])
+        if existing is None:
+            raise LeaseNotFoundError("Lease wurde nicht gefunden.")
+        if existing.released_at is not None:
+            return existing
+        if values["released_at"] < existing.created_at:
+            raise LeaseConflictError("Lease-Zeitbasis steht in Konflikt mit dem Bestand.")
+        statement = (
+            update(Lease)
+            .where(
+                Lease.lease_id == values["lease_id"],
+                Lease.released_at.is_(None),
+            )
+            .values(
+                released_at=values["released_at"],
+                release_reason=values["release_reason"],
+            )
+        )
+        self._session.execute(statement)
+        entity = self._session.get(Lease, values["lease_id"], populate_existing=True)
+        if entity is None:
+            raise LeaseNotFoundError("Lease wurde nicht gefunden.")
+        return entity
+
+    @_redact_repository_traceback
+    def list_active(self, *, worker_id: str, observed_at: int) -> list[Lease]:
+        """Return only unreleased leases whose expiry is strictly in the future."""
+
+        values = self._validation.lease_observation(
+            {"worker_id": worker_id, "observed_at": observed_at}
+        )
+        statement = (
+            select(Lease)
+            .where(
+                Lease.worker_id == values["worker_id"],
+                Lease.released_at.is_(None),
+                Lease.expires_at > values["observed_at"],
+            )
+            .order_by(Lease.lease_id)
+        )
+        return list(self._session.scalars(statement))
+
+    def _require_references(self, values: Mapping[str, object]) -> None:
         _require_present(self._session, WorkerState, values["worker_id"], "worker_id")
         job_id = values["job_id"]
         attempt_id = values["attempt_id"]
@@ -131,9 +249,14 @@ class LeasesRepository(_Repository):
             attempt = _require_present(self._session, Attempt, attempt_id, "attempt_id")
             if job_id is not None and attempt.job_id != job_id:
                 _integrity_failure("attempt_id", "job_correlation")
-        entity = Lease(**values)
-        self._session.add(entity)
-        return entity
+
+    def _raise_renewal_failure(self, lease_id: str, observed_at: int) -> None:
+        entity = self.get(lease_id)
+        if entity is None:
+            raise LeaseNotFoundError("Lease wurde nicht gefunden.")
+        if entity.released_at is not None or entity.expires_at <= observed_at:
+            raise LeaseInactiveError("Inaktive Lease darf nicht erneuert werden.")
+        raise LeaseConflictError("Lease-Zeitbasis steht in Konflikt mit dem Bestand.")
 
 
 class WorkerStatesRepository(_Repository):
@@ -221,3 +344,13 @@ def _integrity_failure(field_name: str, rule: str) -> None:
     raise PersistenceIntegrityError(
         f"Persistenzintegrität verletzt: Feld '{field_name}', Regel '{rule}'."
     )
+
+
+def _same_lease_contract(entity: Lease, values: Mapping[str, object]) -> bool:
+    identity_matches = all(
+        getattr(entity, field_name) == values[field_name]
+        for field_name in ("worker_id", "owner", "purpose", "job_id", "attempt_id")
+    )
+    requested_ttl = values["expires_at"] - values["created_at"]
+    persisted_ttl = entity.expires_at - entity.created_at
+    return identity_matches and requested_ttl == persisted_ttl

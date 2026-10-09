@@ -420,7 +420,7 @@ ausdrücklich noch nicht implementierte Entscheidungen.
 
 ## OASIX-DEC-017 – Isolierter asynchroner HTTP-Readiness-Adapter
 
-- **Status:** In B.1 implementiert; unabhängige Review-Abnahme ausstehend
+- **Status:** In B.1 implementiert und unabhängig geprüft
 - **Kontext:** Service-Readiness muss asynchron, servicebezogen und anhand der
   extern validierten Worker-Konfiguration geprüft werden. Authentifizierung darf
   nur aus aufgelösten Secret-Referenzen stammen; Redirects, Prozess-Proxies und
@@ -450,7 +450,7 @@ ausdrücklich noch nicht implementierte Entscheidungen.
 
 ## OASIX-DEC-018 – Begrenzte Wake- und Readiness-Orchestrierung ohne State-Automat
 
-- **Status:** In B.2 implementiert; unabhängige Review-Abnahme ausstehend
+- **Status:** In B.2 implementiert und unabhängig geprüft
 - **Kontext:** Ein Wake-on-LAN-Paket bestätigt nur die Übergabe eines
   Netzwerkdatagramms. Tatsächliche Bereitschaft darf erst nach erfolgreichen
   servicebezogenen Probes angenommen werden. v3.4 verlangt begrenzte Versuche,
@@ -478,3 +478,42 @@ ausdrücklich noch nicht implementierte Entscheidungen.
   durch einen Deployment-Smoke-Test zu prüfen.
 - **Quellen:** Requirement CFG-02, CFG-05, WRK-03 bis WRK-05, PWR-02, REC-03
   und AC-03; [Phase B.2](phases/B2-wake-readiness.md)
+
+## OASIX-DEC-019 – Persistenter idempotenter Lease-Lifecycle
+
+- **Status:** In C.1 implementiert; unabhängige Review-Abnahme ausstehend
+- **Kontext:** Jede aktive Worker-Nutzung benötigt nach LSE-01 bis LSE-03 eine
+  persistente Lease. Das A.2-Schema enthält alle erforderlichen Spalten, hatte
+  aber noch keinen fachlichen Vertrag für Acquire, Heartbeat/Renew, Release,
+  Expiry und konkurrierende Wiederholungen.
+- **Gewählte Lösung:** Ein sessiongebundener `LeaseLifecycle` verwendet die vom
+  Aufrufer kontrollierte kurze Transaktion. Acquire erzeugt eine UUIDv4 oder
+  akzeptiert eine bereits vor der Operation stabilisierte UUIDv4 als
+  Idempotenzschlüssel. Wiederholung ist nur bei derselben Lease-Identität,
+  gleicher ursprünglicher TTL und noch aktiver Zeile erfolgreich. Renew
+  aktualisiert mit einem atomaren
+  SQL-Prädikat nur nicht freigegebene und noch nicht abgelaufene Leases, bewegt
+  den Heartbeat nicht rückwärts und verkürzt das Ablaufdatum nicht. Release
+  bewahrt bei Wiederholung die erste Freigabe. Aktivität ist ausschließlich
+  `released_at IS NULL AND expires_at > observed_at`; historische Zeilen
+  bleiben erhalten.
+- **Begründung:** Der Vertrag erfüllt die alleinige Autorität der Lease Registry
+  ohne Aktivitätszähler und schützt Konkurrenzfälle mit den vorhandenen
+  SQLite-Constraints sowie atomaren Insert-/Update-Anweisungen. Eine Migration
+  ist nicht erforderlich.
+- **Berücksichtigte Alternativen:** In-Memory-Leases, automatische
+  Reaktivierung abgelaufener IDs, parallele Nutzungszähler, Löschen bei Ablauf,
+  implizite Repository-Commits und unbeschränkte interne Lock-Retries wurden
+  ausgeschlossen.
+- **Konsequenzen und Trade-offs:** TTLs sind positive ganze Sekunden und werden
+  über eine injizierbare UTC-Uhr als Epoch-Mikrosekunden persistiert. Owner,
+  Purpose und Release-Grund sind generische technische IDs und dürfen keine
+  Secrets oder Freitext-Payloads enthalten. SQLite bleibt Single-Writer;
+  konkurrierende Operationen können nach dem Busy-Timeout sicher scheitern und
+  müssen als vollständige kurze Transaktion mit derselben Lease-ID wiederholt
+  werden. Verwaiste Leases werden durch Ablauf inaktiv, ihre spätere Bereinigung
+  und der reale Recovery-Abgleich sind nicht Teil von C.1.
+- **Quellen:** Requirement LSE-01 bis LSE-03, PWR-01, REC-01, REC-04, SEC-03
+  und AC-04; [Phase C.1](phases/C1-lease-lifecycle.md),
+  [Lease-Lifecycle](../../src/oasix/persistence/leases.py),
+  [Lease-Repository](../../src/oasix/persistence/repositories.py)

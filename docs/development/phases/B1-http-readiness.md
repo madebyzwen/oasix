@@ -1,6 +1,6 @@
 # Phase B.1 – HTTP-Service-Readiness
 
-Status: implementiert, unabhängige Review-Abnahme ausstehend
+Status: abgeschlossen und unabhängig geprüft
 
 ## 1. Ziel und Abgrenzung
 
@@ -103,9 +103,8 @@ HTTP-/TLS-Dienst bleibt bis zu einem Deployment-Smoke-Test unbestätigt.
 
 ## 8. Abnahmestatus
 
-B.1 ist implementiert und lokal vollständig geprüft, aber bis zum unabhängigen
-Code-Review nicht freigegeben. B.2 bis B.5 wurden in diesem Commit nicht
-begonnen.
+B.1 ist implementiert, lokal vollständig geprüft und unabhängig freigegeben.
+B.2 bis B.5 wurden in diesem Commit nicht begonnen.
 
 ## 9. GitHub-Referenzen
 

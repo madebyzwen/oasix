@@ -232,6 +232,18 @@ class RepositoryValidation:
         return _validate_model(_LeaseInput, data).model_dump()
 
     @_redact_validation_traceback
+    def lease_observation(self, data: Mapping[str, object]) -> dict[str, Any]:
+        return _validate_model(_LeaseObservationInput, data).model_dump()
+
+    @_redact_validation_traceback
+    def lease_renewal(self, data: Mapping[str, object]) -> dict[str, Any]:
+        return _validate_model(_LeaseRenewalInput, data).model_dump()
+
+    @_redact_validation_traceback
+    def lease_release(self, data: Mapping[str, object]) -> dict[str, Any]:
+        return _validate_model(_LeaseReleaseInput, data).model_dump()
+
+    @_redact_validation_traceback
     def worker_state(self, data: Mapping[str, object]) -> dict[str, Any]:
         return _validate_model(_WorkerStateInput, data).model_dump()
 
@@ -428,6 +440,50 @@ class _LeaseInput(_InputModel):
             _fail("expires_at", "timestamp_order")
         if self.released_at is not None and self.released_at < self.created_at:
             _fail("released_at", "timestamp_order")
+        return self
+
+
+class _LeaseObservationInput(_InputModel):
+    lease_id: StrictStr | None = None
+    worker_id: StrictStr | None = None
+    observed_at: StrictInt
+
+    @model_validator(mode="after")
+    def validate_contract(self) -> Self:
+        if (self.lease_id is None) == (self.worker_id is None):
+            _fail("input", "exactly_one_identifier")
+        if self.lease_id is not None:
+            _canonical_uuid(self.lease_id, "lease_id")
+        if self.worker_id is not None:
+            _identifier(self.worker_id, "worker_id")
+        _nonnegative_timestamps(self)
+        return self
+
+
+class _LeaseRenewalInput(_InputModel):
+    lease_id: StrictStr
+    last_heartbeat_at: StrictInt
+    expires_at: StrictInt
+
+    @model_validator(mode="after")
+    def validate_contract(self) -> Self:
+        _canonical_uuid(self.lease_id, "lease_id")
+        _nonnegative_timestamps(self)
+        if self.expires_at <= self.last_heartbeat_at:
+            _fail("expires_at", "timestamp_order")
+        return self
+
+
+class _LeaseReleaseInput(_InputModel):
+    lease_id: StrictStr
+    released_at: StrictInt
+    release_reason: StrictStr
+
+    @model_validator(mode="after")
+    def validate_contract(self) -> Self:
+        _canonical_uuid(self.lease_id, "lease_id")
+        _identifier(self.release_reason, "release_reason")
+        _nonnegative_timestamps(self)
         return self
 
 

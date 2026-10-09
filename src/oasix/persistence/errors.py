@@ -35,3 +35,19 @@ class PersistenceLockingError(PersistenceError):
 
 class PersistenceOperationError(PersistenceError):
     """A database operation failed without exposing driver details."""
+
+
+class LeaseLifecycleError(PersistenceError):
+    """A persistent lease operation failed at a controlled lifecycle boundary."""
+
+
+class LeaseNotFoundError(LeaseLifecycleError):
+    """The requested lease identity does not exist."""
+
+
+class LeaseConflictError(LeaseLifecycleError):
+    """A lease operation conflicts with its persisted identity or chronology."""
+
+
+class LeaseInactiveError(LeaseLifecycleError):
+    """A released or expired lease cannot be renewed or reacquired."""
