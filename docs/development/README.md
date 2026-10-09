@@ -24,9 +24,10 @@ Vorgaben konkreten Implementierungsphasen zu und unterscheiden dabei zwischen:
 - [Vorlage für zukünftige Phasen](templates/phase-template.md)
 
 Das A.2-Design ist abgeschlossen. A.2.1 implementiert Runtime-Schema v2 und das
-SQLite-/SQLAlchemy-Fundament; Tabellen, Migrationen und fachliche
-Persistenzabläufe der offenen Etappen A.2.2 und A.2.3 sind weiterhin nur
-geplant.
+SQLite-/SQLAlchemy-Fundament; A.2.2 implementiert die sechs Kerntabellen und
+die Alembic-Initialmigration. Repository-Grenzen, zentrale
+Anwendungsvalidierung und fachliche Persistenzabläufe bleiben A.2.3
+beziehungsweise späteren Phasen vorbehalten.
 
 ## Pflegeregeln
 

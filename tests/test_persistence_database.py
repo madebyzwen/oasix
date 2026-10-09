@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sqlite3
 import stat
 from pathlib import Path
 from types import SimpleNamespace
@@ -16,6 +17,7 @@ from oasix.persistence import (
     PersistenceInitializationError,
     initialize_persistence,
 )
+from oasix.persistence import database as database_module
 from oasix.persistence.database import (
     SQLITE_MAX_OVERFLOW,
     SQLITE_POOL_SIZE,
@@ -63,11 +65,33 @@ def test_initializes_verified_sqlite_pragmas_and_bounded_pool(
             assert connection.execute(text("PRAGMA foreign_keys")).scalar_one() == 1
             assert connection.execute(text("PRAGMA synchronous")).scalar_one() == 2
             assert connection.execute(text("PRAGMA busy_timeout")).scalar_one() == 5000
+            assert connection.execute(text("SELECT json_valid('{}')")).scalar_one() == 1
         assert SQLITE_POOL_SIZE == 5
         assert SQLITE_MAX_OVERFLOW == 0
         assert SQLITE_POOL_TIMEOUT_SECONDS == 5
     finally:
         database.close()
+
+
+def test_missing_sqlite_json_function_fails_closed(
+    valid_config_data: dict[str, Any],
+    tmp_path: Path,
+    secret_directory: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unavailable(_cursor: sqlite3.Cursor) -> None:
+        raise sqlite3.OperationalError("SENTINEL-PRIVATE-JSON-FAILURE")
+
+    monkeypatch.setattr(database_module, "_verify_required_sqlite_json", unavailable)
+
+    with pytest.raises(PersistenceInitializationError) as captured:
+        initialize_persistence(
+            _runtime(valid_config_data),
+            _bootstrap(tmp_path, secret_directory),
+        )
+
+    assert "SENTINEL-PRIVATE-JSON-FAILURE" not in str(captured.value)
+    assert "SENTINEL-PRIVATE-JSON-FAILURE" not in repr(captured.value)
 
 
 def test_applies_configured_busy_timeout(

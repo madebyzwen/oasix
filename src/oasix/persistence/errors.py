@@ -15,3 +15,7 @@ class PersistenceConnectionError(PersistenceError):
 
 class PersistenceInitializationError(PersistenceError):
     """Required SQLite settings could not be initialized or verified."""
+
+
+class PersistenceMigrationError(PersistenceError):
+    """A schema migration or its integrity verification failed safely."""

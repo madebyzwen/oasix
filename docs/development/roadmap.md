@@ -15,13 +15,14 @@ festgelegte Umfang implementiert und geprüft wurde.
 | A.1.1 – Security & Quality Hardening | Abgeschlossen | Fehlerredaktion, sichere Secret-Dateizugriffe, Größenlimit, URL-Regeln, MAC-Prüfung und Immutability wurden gehärtet und getestet. | [Commit `6296d62`](https://github.com/madebyzwen/oasix/commit/6296d6267776fd35827fc59acf6793b93657643e), [Commit `c4bdf95`](https://github.com/madebyzwen/oasix/commit/c4bdf9527a117468c61132607a9baa82e8f8a0b5) |
 | A.1.2 – Linux-CI | Implementiert und in `main` integriert | GitHub Actions führt Tests, Linting, Formatprüfung und Import-Smoke-Test mit Python 3.12 auf `ubuntu-latest` aus. | [PR #1](https://github.com/madebyzwen/oasix/pull/1), [Merge-Commit `0aea2f0`](https://github.com/madebyzwen/oasix/commit/0aea2f0c16278ee770546597c355a851d7f856b2) |
 | A.2 – Persistenzdesign | Abgeschlossen | Der finalisierte Entwurf begrenzt die Initialmigration auf sechs Kerntabellen und legt Runtime-Schema v2, SQLite-Betrieb, Persistenzgrenzen, Idempotenz und Nutzdatenschutz fest. | [Phase A.2](phases/A2-persistence.md), [PR #3](https://github.com/madebyzwen/oasix/pull/3) |
-| A.2.1 – Runtime-Konfiguration und SQLite-Fundament | Implementiert, Review ausstehend | Runtime-Schema v2, sichere Datenbankpfadprüfung, begrenzte SQLAlchemy-Engine, verifizierte SQLite-Pragmas sowie Session- und Transaktionskontexte sind implementiert und lokal getestet. Es werden noch keine Fachtabellen oder Migrationen angelegt. | [Phase A.2](phases/A2-persistence.md), [Persistence-Paket](../../src/oasix/persistence), [Tests](../../tests/test_persistence_database.py) |
-| A.2.2 – Schema und Initialmigration | Offen | Die sechs freigegebenen SQLAlchemy-Fachtabellen, ihre Constraints und die Alembic-Initialmigration sind noch nicht implementiert. | [Phase A.2](phases/A2-persistence.md#4-entscheidungen-und-migrationsumfang) |
+| A.2.1 – Runtime-Konfiguration und SQLite-Fundament | Abgeschlossen | Runtime-Schema v2, sichere Datenbankpfadprüfung, begrenzte SQLAlchemy-Engine, verifizierte SQLite-Pragmas sowie Session- und Transaktionskontexte sind implementiert und getestet. | [Phase A.2](phases/A2-persistence.md), [Commit `cba7be6`](https://github.com/madebyzwen/oasix/commit/cba7be6) |
+| A.2.2 – Schema und Initialmigration | Implementiert, Review ausstehend | Sechs SQLAlchemy-Modelle, ihre benannten Constraints und Indizes sowie die lineare Alembic-Initialrevision `0001_a2_2` sind implementiert und lokal geprüft. Runtime-Initialisierung führt keine automatische Migration aus. | [Phase A.2](phases/A2-persistence.md#4-entscheidungen-und-migrationsumfang), [Modelle](../../src/oasix/persistence/models.py), [Migration](../../alembic/versions/0001_a2_2_initial_persistence.py) |
 | A.2.3 – Persistenzzugriff und Integritätsnachweise | Offen | Repository-Grenzen, zentrale Nutzdatenvalidierung und die verbleibenden A.2-Integritätsnachweise folgen nach separater Freigabe. | [Phase A.2](phases/A2-persistence.md#6-tests-und-nachweise) |
 
 Phase A des Requirements ist trotz abgeschlossener A.1 und implementiertem
-SQLite-Fundament noch nicht insgesamt abgeschlossen: Schema, Migrationen und
-weitere Fundamentbestandteile folgen in späteren Teilphasen.
+SQLite-Schema noch nicht insgesamt abgeschlossen: Repository-Grenzen,
+Anwendungsvalidierung und weitere Fundamentbestandteile folgen in späteren
+Teilphasen.
 
 ## Weitere MVP-Stufen
 

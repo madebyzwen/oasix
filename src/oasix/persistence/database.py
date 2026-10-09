@@ -168,6 +168,7 @@ def _create_sqlite_engine(prepared: PreparedDatabasePath, busy_timeout_ms: int) 
             cursor.execute("PRAGMA foreign_keys=ON")
             cursor.execute("PRAGMA synchronous=FULL")
             cursor.execute(f"PRAGMA busy_timeout={busy_timeout_ms}")
+            _verify_required_sqlite_json(cursor)
 
             cursor.execute("PRAGMA foreign_keys")
             foreign_keys = cursor.fetchone()
@@ -192,6 +193,14 @@ def _create_sqlite_engine(prepared: PreparedDatabasePath, busy_timeout_ms: int) 
             raise _PragmaInitializationError
 
     return engine
+
+
+def _verify_required_sqlite_json(cursor: sqlite3.Cursor) -> None:
+    """Fail closed unless SQLite's JSON validation function behaves correctly."""
+
+    cursor.execute("SELECT json_valid('{}'), json_valid('{')")
+    if cursor.fetchone() != (1, 0):
+        raise _PragmaInitializationError
 
 
 def _raise_initialization_error(status: _InitializationStatus) -> None:

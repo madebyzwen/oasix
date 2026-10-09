@@ -230,5 +230,9 @@ nicht implementiert und bleibt Deployment-Verantwortung. Zwischen der
 descriptorbasierten Reservierung und dem Öffnen durch SQLite verbleibt außerdem
 ein nicht vollständig schließbares Zeitfenster gegenüber einem bösartigen
 Prozess mit derselben Benutzer-ID. Datenbankverzeichnis und Prozesskonto müssen
-daher exklusiv kontrolliert werden. A.2.1 legt noch keine Fachtabellen an und
-führt weder `create_all()` noch Alembic-Migrationen automatisch aus.
+daher exklusiv kontrolliert werden. Die normale Runtime-Initialisierung legt
+weiterhin keine Fachtabellen an und führt weder `create_all()` noch Migrationen
+automatisch aus. Das versionierte A.2.2-Schema wird als separate
+Wartungsoperation mit `python -m alembic -c alembic.ini upgrade head`
+installiert; Alembic bezieht Datenbank- und Secret-Quelle dabei aus denselben
+validierten Bootstrap- und Runtime-Einstellungen wie die Anwendung.

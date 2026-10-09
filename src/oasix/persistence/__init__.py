@@ -6,7 +6,9 @@ from oasix.persistence.errors import (
     PersistenceConnectionError,
     PersistenceError,
     PersistenceInitializationError,
+    PersistenceMigrationError,
 )
+from oasix.persistence.models import Attempt, Base, ControlState, Job, JobEvent, Lease, WorkerState
 
 __all__ = [
     "PersistenceConfigurationError",
@@ -14,5 +16,13 @@ __all__ = [
     "PersistenceDatabase",
     "PersistenceError",
     "PersistenceInitializationError",
+    "PersistenceMigrationError",
+    "Attempt",
+    "Base",
+    "ControlState",
+    "Job",
+    "JobEvent",
+    "Lease",
+    "WorkerState",
     "initialize_persistence",
 ]

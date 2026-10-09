@@ -1,6 +1,6 @@
 # Phase A.2 – Datenbankdesign und Architekturplanung
 
-Status: **Design abgeschlossen – A.2.1 implementiert, A.2.2 und A.2.3 offen**
+Status: **Design abgeschlossen – A.2.1 und A.2.2 implementiert, A.2.3 offen**
 
 ## 1. Ziel und Abgrenzung
 
@@ -10,17 +10,16 @@ aus Python 3.12, SQLite im WAL-Modus, SQLAlchemy 2, Alembic und pytest.
 
 Dieses Dokument ist der finalisierte Entwurf nach abgeschlossenem
 Architektur-Review. A.2.1 setzt Runtime-Schema v2, die sichere Pfadprüfung und
-das SQLAlchemy-/SQLite-Fundament um. Es legt ausdrücklich weder Fachtabellen
-noch Alembic-Migrationen an. Die erste Migration bleibt auf sechs fachliche
-Kerntabellen begrenzt. Queue-Dispatch, Retry, Recovery, Lease-Ablauf und
-Power-Steuerung werden hier nur durch Persistenzverträge vorbereitet; ihre
+das SQLAlchemy-/SQLite-Fundament um. A.2.2 ergänzt exakt sechs Fachtabellen und
+eine Alembic-Initialmigration. Queue-Dispatch, Retry, Recovery, Lease-Ablauf
+und Power-Steuerung werden hier nur durch Persistenzverträge vorbereitet; ihre
 Geschäftslogik und vollständigen Zustandsautomaten folgen in späteren Phasen
 nach separater Freigabe.
 
 | Etappe | Status | Umfang |
 | --- | --- | --- |
 | A.2.1 | Implementiert; Review ausstehend | Runtime-Version 2, Datenbankpfadprüfung, Engine, Pflicht-Pragmas, begrenzter Pool, Session- und Transaktionslebenszyklus |
-| A.2.2 | Offen | Sechs SQLAlchemy-Kerntabellen und Alembic-Initialmigration |
+| A.2.2 | Implementiert; Review ausstehend | Sechs SQLAlchemy-Kerntabellen, benannte Constraints und Indizes, Initialrevision `0001_a2_2` sowie Integritätsprüfungen |
 | A.2.3 | Offen | Repository-Grenzen, zentrale Nutzdatenvalidierung und verbleibende A.2-Integritätsnachweise |
 
 ## 2. Verbindliche Anforderungen
@@ -138,7 +137,7 @@ Die langfristigen Entscheidungen stehen knapp im
 [Entscheidungsregister](../decisions.md). Dieses Dokument enthält das konkrete
 Schema und die Betriebsverträge.
 
-Die erste Alembic-Migration erzeugt genau diese sechs fachlichen Tabellen:
+Die Initialrevision `0001_a2_2` erzeugt genau diese sechs fachlichen Tabellen:
 
 1. `jobs`
 2. `attempts`
@@ -149,7 +148,8 @@ Die erste Alembic-Migration erzeugt genau diese sechs fachlichen Tabellen:
 
 Alembics technische Tabelle `alembic_version` wird vom Migrationswerkzeug
 verwaltet und ist keine OASIX-Fachtabelle. Die Initialmigration legt außerdem
-die Singleton-Zeile in `control_state` an.
+die Singleton-Zeile in `control_state` an. Upgrade, Downgrade auf `base` und
+erneutes Upgrade sind implementiert und geprüft.
 
 Folgende fünf fachlichen Tabellen gehören ausdrücklich **nicht** zur ersten
 Migration und werden erst zusammen mit der jeweils verantwortlichen
@@ -178,8 +178,9 @@ Geschäftskomponente entworfen und migriert:
 - Statuswerte liegen als `VARCHAR` mit benannten `CHECK`-Constraints vor.
 - JSON liegt kanonisch UTF-8-codiert in `TEXT`. Die Anwendung prüft Schema,
   Verschachtelung und Byte-Limit vor dem Schreiben; die Migration ergänzt
-  `CHECK(json_valid(...))`. Die Engine-Initialisierung muss die benötigten
-  SQLite-JSON-Funktionen prüfen und bei deren Fehlen geschlossen fehlschlagen.
+  `CHECK(json_valid(...))`. Die Engine-Initialisierung prüft `json_valid` mit
+  gültiger und ungültiger Eingabe und schlägt bei fehlender oder fehlerhafter
+  Funktion geschlossen fehl.
 - Alle Foreign Keys und Constraints erhalten stabile Namen. Foreign Keys
   verwenden `ON DELETE RESTRICT`; ein späterer Retention-Use-Case löscht
   abhängige Zeilen bewusst und atomar.
@@ -607,6 +608,8 @@ Implementierte Verbindungsinitialisierung:
 - `PRAGMA busy_timeout=5000` auf jeder Verbindung, sofern die validierte
   Runtime-Konfiguration keinen ausdrücklich anderen positiven Wert vorgibt;
 - `PRAGMA synchronous=FULL` als sicherheitsorientierter MVP-Default;
+- verifiziertes SQLite-`json_valid` als Voraussetzung für die JSON-
+  Datenbankconstraints;
 - SQLAlchemy-`QueuePool` mit `pool_size=5`, `max_overflow=0` und
   `pool_timeout=5` Sekunden als einfache, begrenzte Ausgangskonfiguration.
 
@@ -663,6 +666,23 @@ DB-Transaktion offen.
 Die Initialmigration erstellt die sechs fachlichen Tabellen, benannten
 Constraints, Indizes und die `control_state`-Singleton-Zeile. Das
 Produktionsschema wird nicht über `Base.metadata.create_all()` erzeugt.
+
+Migrationen werden ausschließlich als separate Wartungsoperation ausgeführt.
+Bei gesetzten Bootstrap-Quellen lautet der tatsächliche Aufruf:
+
+```bash
+OASIX_CONFIG_FILE=/path/provided-by-deployment/oasix.yaml \
+OASIX_SECRETS_DIRECTORY=/path/provided-by-deployment/secrets \
+python -m alembic -c alembic.ini upgrade head
+```
+
+Die Alembic-Konfiguration enthält bewusst keine zweite Datenbank-URL. `env.py`
+lädt die validierte Runtime-Konfiguration und verwendet die A.2.1-Engine samt
+Pfad-, Berechtigungs- und PRAGMA-Prüfungen. Erwarteter und einziger Head ist
+`0001_a2_2`. Nach jeder Upgrade- oder Downgrade-Operation werden
+`foreign_key_check` und `integrity_check` ausgeführt. `downgrade base` ist für
+Tests und kontrollierte Wartung verfügbar, aber kein Ersatz für das unten
+beschriebene Produktions-Restore-Verfahren.
 
 - Es gibt zunächst genau einen linearen Alembic-Head.
 - Autogenerate ist nur Entwurfswerkzeug; jede Migration wird manuell auf
@@ -741,8 +761,9 @@ Offsite-Ablage und numerische Backup-Retention bleiben offene Betriebsfragen.
 
 ## 6. Tests und Nachweise
 
-Die A.2.1-Tests verwenden ausschließlich temporäre lokale Datenbanken. Der
-verbleibende A.2-Umfang wird erst mit A.2.2 und A.2.3 nachgewiesen.
+Die A.2.1- und A.2.2-Tests verwenden ausschließlich temporäre lokale
+Datenbanken. Der verbleibende Anwendungsumfang wird erst mit A.2.3
+nachgewiesen.
 
 ### A.2.1 – implementiert und lokal nachgewiesen
 
@@ -758,6 +779,27 @@ verbleibende A.2-Umfang wird erst mit A.2.2 und A.2.3 nachgewiesen.
   persistenten Testdaten,
 - keine automatische Anlage eines Anwendungsschemas sowie Redaktion privater
   Pfade und gebundener SQL-Parameter in Fehlerrepräsentationen.
+
+### A.2.2 – implementiert und lokal nachgewiesen
+
+- exakt sechs deklarative SQLAlchemy-Modelle und eine gemeinsame
+  `Base.metadata`, einschließlich dokumentierter Beziehungen und
+  Nullability-Regeln,
+- explizit benannte Primär-/Fremdschlüssel, Unique- und CHECK-Constraints sowie
+  normale und partielle SQLite-Indizes,
+- Upgrade einer leeren Dateidatenbank auf den einzigen Head `0001_a2_2`,
+  unveränderter zweiter Upgrade-Aufruf, Downgrade auf `base` und erneutes
+  Upgrade,
+- exakt eine initiale `control_state`-Zeile mit `PAUSED_RECOVERY`, `REQUIRED`,
+  leerer Prozessinstanz und Version 1,
+- erfolgreiche und abgewiesene Schreibvorgänge für Foreign Keys, Statuswerte,
+  Versionen, Zeitreihenfolgen, Idempotenz, offene Attempts, Leases, JSON und
+  alle dokumentierten UTF-8-Byte-Limits,
+- Persistenz nach Engine-Neuerzeugung und Lesen aus einem separaten Subprozess,
+  atomarer Rollback zusammengehöriger Inserts sowie Foreign Keys auf getrennten
+  Verbindungen,
+- `foreign_key_check`, `integrity_check`, Revisionsprüfung, sichere
+  SQL-Parameterdarstellung und Fail-Closed-Test bei fehlendem `json_valid`.
 
 ### Gesamtabnahme A.2 – verpflichtend
 
@@ -792,10 +834,11 @@ mehrere Verbindungen erforderlich sind, werden tatsächlich getrennte
 Verbindungen verwendet; eine einzelne In-Memory-Verbindung belegt weder
 Poolverhalten noch Persistenz.
 
-Die Punkte zur Initialmigration, zu den sechs Kerntabellen, zu allen
-Nutzdatenlimits sowie zu Alembic-Revision und vollständigen Integritätschecks
-sind mit A.2.1 noch nicht erfüllt. Sie gehören zu den offenen Etappen A.2.2 und
-A.2.3.
+Die Datenbankconstraints für JSON-Syntax und Byte-Limits sind mit A.2.2
+implementiert. Typspezifische JSON-Allowlist-Modelle, inhaltliche Verbote für
+Secrets beziehungsweise authentifizierende Referenzen und sichere
+Repository-Fehler folgen in A.2.3; sie werden nicht als bereits umgesetzt
+dargestellt.
 
 ### Spätere Phasen
 
@@ -883,16 +926,18 @@ zugehörigen fachlichen Verträgen.
 ## 8. Abnahmestatus
 
 Der Architektur-Review ist abgeschlossen und der A.2-Entwurf ist
-**designseitig freigegeben**. A.2.1 ist implementiert und lokal geprüft; die
-Code-Review-Abnahme steht noch aus. A.2.2 und A.2.3 bleiben offen und benötigen
-jeweils eine separate Freigabe.
+**designseitig freigegeben**. A.2.1 ist abgeschlossen. A.2.2 ist implementiert
+und lokal geprüft; die unabhängige Code-Review-Abnahme steht noch aus. A.2.3
+bleibt offen und benötigt eine separate Freigabe.
 
-Das vorhandene Fundament belegt Konfigurations-, Verbindungs- und generische
-Transaktionseigenschaften, aber noch keine Fachtabellen, Migrationen,
-Repositories, Recovery oder Produktionsreife.
+Das vorhandene Fundament belegt Konfigurations-, Verbindungs-, Schema-,
+Migrations- und Datenbankintegritätseigenschaften, aber noch keine Repositories,
+fachliche Transitionen, Recovery oder Produktionsreife.
 
 ## 9. GitHub-Referenzen
 
 - Design-Pull-Request:
   [PR #3 – docs: design A2 persistence architecture](https://github.com/madebyzwen/oasix/pull/3)
-- A.2.1-Implementierungs-Commit und Persistenz-CI-Lauf: noch nicht vorhanden
+- A.2.1-Implementierungs-Commit: `cba7be6`
+- A.2.2-Implementierungs-Commit und zugehöriger CI-Lauf: werden mit diesem
+  Arbeitsauftrag erzeugt
