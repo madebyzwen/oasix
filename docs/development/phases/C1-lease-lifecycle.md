@@ -1,6 +1,6 @@
 # Phase C.1 – Persistenter Lease-Lifecycle
 
-Status: implementiert, unabhängige Review-Abnahme ausstehend
+Status: implementiert und unabhängig geprüft
 
 ## 1. Ziel und Abgrenzung
 
@@ -114,7 +114,7 @@ festgehalten.
 | Vollständige pytest-Suite | lokal, macOS, Python 3.12 | 269 bestanden | `feature/b-llm-path` vor Korrektur-Commit |
 | Ruff Linting und Formatprüfung | lokal, macOS, Python 3.12 | bestanden, 58 Dateien geprüft | `feature/b-llm-path` vor Commit |
 | Paket-, Import-, Dokumentationslink- und Diff-Prüfung | lokal | bestanden | `feature/b-llm-path` vor Commit |
-| Linux-CI | GitHub Actions, Ubuntu, Python 3.12 | nach Push ausstehend | [PR #6](https://github.com/madebyzwen/oasix/pull/6) |
+| Linux-CI | GitHub Actions, Ubuntu, Python 3.12 | bestanden | [Lauf `38004074726`](https://github.com/madebyzwen/oasix/actions/runs/38004074726) |
 
 Die Tests verwenden ausschließlich lokale SQLite-Dateien und injizierte Uhren.
 Es werden keine Worker, Netzwerkdienste oder realen Secret-Dateien benötigt.
@@ -129,10 +129,11 @@ ausreichen. Der spätere B.3-Ablauf kann eine stabile Lease-ID vor Wake,
 Readiness und Upstream-Nutzung transaktional erwerben, während langer Nutzung
 erneuern und nach vollständigem Ende freigeben.
 
-B.3 bleibt dennoch blockiert:
+B.3 bleibt vor seiner Implementierung dennoch blockiert:
 
-- Der externe Client-API-Schlüssel- und Berechtigungsvertrag für `/v1/...`
-  fehlt weiterhin. Provider- und Client-Credentials müssen getrennt bleiben.
+- B.3.0 implementiert den externen Client-API-Schlüssel- und
+  Berechtigungsvertrag für `/v1/...`, bleibt aber bis zu dessen eigener
+  unabhängiger Review-Abnahme unfreigegeben.
 - Die Integration von Authentifizierung, Concurrency-Gate, Lease, Wake,
   Readiness, Upstream-Streaming sowie Abbruch-/Fehlerpfaden ist nicht Teil von
   C.1 und muss in B.3 atomar beziehungsweise kompensierend entworfen werden.
@@ -146,16 +147,17 @@ B.3 bleibt dennoch blockiert:
 
 ## 8. Abnahmestatus
 
-C.1 ist implementiert und lokal getestet, aber bis zum unabhängigen
-GitHub-Code-Review nicht freigegeben. Der Lifecycle darf daher noch nicht als
-abgenommene Voraussetzung für einen produktiven LLM-Pfad gelten. B.3 wurde
-nicht fortgesetzt und B.4/B.5 wurden nicht begonnen.
+C.1 ist implementiert, unabhängig geprüft und für seinen dokumentierten
+Lifecycle-Umfang freigegeben. Die Abnahme umfasst weder B.3-Ablaufkomposition
+noch Proxy, Streaming, Power- oder Recovery-Logik. B.3 wurde nicht begonnen
+und B.4/B.5 wurden nicht begonnen.
 
 ## 9. GitHub-Referenzen
 
 - Implementierung: [`017c94d`](https://github.com/madebyzwen/oasix/commit/017c94dda1a1cc4ff12db065edce124801704287)
-- Review-Nachbesserung: `fix(leases): preserve acquire idempotency after renewal`
-  in [PR #6](https://github.com/madebyzwen/oasix/pull/6)
+- Review-Nachbesserung:
+  [`811afd3`](https://github.com/madebyzwen/oasix/commit/811afd3ec901e86990fbb0895757291063ba64ce)
 - Pull Request: [PR #6](https://github.com/madebyzwen/oasix/pull/6), offen und
   nicht gemergt
 - Linux-CI der Implementierung: [Lauf `38003515144`](https://github.com/madebyzwen/oasix/actions/runs/38003515144)
+- Linux-CI der Review-Nachbesserung: [Lauf `38004074726`](https://github.com/madebyzwen/oasix/actions/runs/38004074726)

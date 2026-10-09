@@ -46,8 +46,11 @@ def test_repository_example_is_a_valid_runtime_configuration(
         )
     )
 
-    assert loaded.runtime.schema_version == 2
+    assert loaded.runtime.schema_version == 3
     assert loaded.runtime.active_worker == "worker-primary"
+    assert loaded.runtime.client_auth is not None
+    assert len(loaded.runtime.client_auth.clients) == 2
+    assert len(loaded.secrets) == 6
 
 
 def test_supports_multiple_worker_profiles_and_selects_active_worker(

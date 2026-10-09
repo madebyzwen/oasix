@@ -108,12 +108,40 @@ def write_config(tmp_path: Path) -> Callable[[dict[str, Any]], Path]:
 
 
 @pytest.fixture
+def auth_config_data(valid_config_data: dict[str, Any]) -> dict[str, Any]:
+    valid_config_data["schema_version"] = 3
+    valid_config_data["client_auth"] = {
+        "clients": {
+            "inference-client": {
+                "key_secrets": [
+                    {"source": "file", "name": "client_inference_key"},
+                    {"source": "file", "name": "client_inference_next_key"},
+                ],
+                "permissions": ["inference"],
+            },
+            "operations-client": {
+                "key_secrets": [{"source": "file", "name": "client_admin_key"}],
+                "permissions": ["administration"],
+            },
+        }
+    }
+    return valid_config_data
+
+
+@pytest.fixture
 def secret_directory(tmp_path: Path) -> Path:
     directory = tmp_path / "secrets"
     directory.mkdir()
     (directory / "worker_ssh_key").write_text("private-key-value\n", encoding="utf-8")
     (directory / "worker_known_hosts").write_text("known-host-value\n", encoding="utf-8")
     (directory / "llm_api_token").write_text("api-token-value\n", encoding="utf-8")
+    (directory / "client_inference_key").write_text(
+        "inference-client-key-current\n", encoding="utf-8"
+    )
+    (directory / "client_inference_next_key").write_text(
+        "inference-client-key-next\n", encoding="utf-8"
+    )
+    (directory / "client_admin_key").write_text("administration-client-key\n", encoding="utf-8")
     return directory
 
 

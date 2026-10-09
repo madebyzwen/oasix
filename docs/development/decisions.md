@@ -237,7 +237,8 @@ ausdrücklich noch nicht implementierte Entscheidungen.
 
 ## OASIX-DEC-011 – Runtime-Schema Version 2 für Persistenz
 
-- **Status:** Akzeptiert und in A.2.1 implementiert
+- **Status:** Akzeptiert und in A.2.1 implementiert; durch die additive Version
+  3 aus OASIX-DEC-020 erweitert
 - **Kontext:** Die bisherige Runtime-Version 1 enthält Worker, Services und
   Policies, aber keinen sicheren, extern konfigurierten Datenbankpfad. Ein
   stiller Default oder eine neue Bootstrap-Variable würde die vorhandene
@@ -254,11 +255,12 @@ ausdrücklich noch nicht implementierte Entscheidungen.
 - **Berücksichtigte Alternativen:** Fest codierter Pfad, Datenbank-URL,
   automatische Version-1-Aufwertung und eine weitere `OASIX_`-
   Umgebungsvariable wurden verworfen.
-- **Konsequenzen und Trade-offs:** Deployments müssen ihre YAML manuell auf
+- **Konsequenzen und Trade-offs:** Deployments mussten ihre YAML manuell auf
   Version 2 anheben. Der Zielpfad benötigt ein lokales persistentes Volume,
-  restriktive Rechte und Platz für DB, WAL und SHM. Der aktuelle Loader weist
-  Version 1 sicher ab; es gibt keinen stillen Fallback und keine automatische
-  Aktualisierung der YAML-Datei.
+  restriktive Rechte und Platz für DB, WAL und SHM. Version 3 übernimmt diese
+  Persistenzsektion unverändert und ergänzt ausschließlich Client-
+  Authentifizierung. Der Loader weist Version 1 weiter sicher ab; es gibt
+  keinen stillen Fallback und keine automatische Aktualisierung der YAML-Datei.
 - **Quellen:** Requirement CFG-01, CFG-02, JOB-03 und JOB-04;
   [Phase-A.2-Design](phases/A2-persistence.md#511-runtime-konfiguration-schema_version-2),
   [Runtime-Modelle](../../src/oasix/config/models.py)
@@ -481,7 +483,7 @@ ausdrücklich noch nicht implementierte Entscheidungen.
 
 ## OASIX-DEC-019 – Persistenter idempotenter Lease-Lifecycle
 
-- **Status:** In C.1 implementiert; unabhängige Review-Abnahme ausstehend
+- **Status:** In C.1 implementiert und unabhängig geprüft
 - **Kontext:** Jede aktive Worker-Nutzung benötigt nach LSE-01 bis LSE-03 eine
   persistente Lease. Das A.2-Schema enthält alle erforderlichen Spalten, hatte
   aber noch keinen fachlichen Vertrag für Acquire, Heartbeat/Renew, Release,
@@ -522,3 +524,47 @@ ausdrücklich noch nicht implementierte Entscheidungen.
   und AC-04; [Phase C.1](phases/C1-lease-lifecycle.md),
   [Lease-Lifecycle](../../src/oasix/persistence/leases.py),
   [Lease-Repository](../../src/oasix/persistence/repositories.py)
+
+## OASIX-DEC-020 – Additives Runtime-Schema 3 und Client-API-Authentifizierung
+
+- **Status:** In B.3.0 implementiert; unabhängige Review-Abnahme ausstehend
+- **Kontext:** SEC-01 verlangt Authentifizierung für Client- und Management-
+  APIs sowie die Trennung unprivilegierter Inference-Nutzung von
+  administrativen Power-Operationen. Runtime-Version 2 kennt ausschließlich
+  Worker-/Provider-Credentials und kann Client-Identitäten deshalb nicht
+  widerspruchsfrei aufnehmen.
+- **Gewählte Lösung:** Runtime-Version 3 ergänzt verpflichtend `client_auth`
+  mit generischen Client-IDs, mindestens einer externen Secret-Referenz und
+  mindestens einer expliziten Capability je Identität. Die geschlossenen
+  Capabilities lauten zunächst `inference` und `administration`; keine davon
+  impliziert die andere oder künftige Operationen. Version-2-Konfigurationen
+  bleiben für vorhandene Komponenten gültig, können aber keinen
+  Client-Authenticator erzeugen. Version 2 darf `client_auth` nicht enthalten,
+  Version 3 darf die Sektion nicht auslassen. Der Authenticator hält nur
+  prozesslokal gepepperte HMAC-SHA-256-Digests und vergleicht einen Request mit
+  allen konfigurierten Digests über `hmac.compare_digest()`. Doppelte Client-
+  Werte sowie Wert- oder Referenzgleichheit mit Provider-Credentials werden
+  beim Startup abgewiesen. Mehrere eindeutige Referenzen derselben Identität
+  bilden das kontrollierte Rotationsfenster.
+- **Begründung:** Eine explizite Versionsgrenze verhindert, dass bestehende
+  Version-2-Dateien stillschweigend eine sicherheitsrelevante Sektion mit
+  Defaults erhalten. Geschlossene Capabilities halten Authentifizierung und
+  Autorisierung getrennt und verhindern einen impliziten Superuser. Die
+  vorhandene Secret-Quelle bleibt allein für Schlüsselwerte zuständig.
+- **Berücksichtigte Alternativen:** Client-Schlüssel als Provider-Credentials,
+  Klartext in YAML, ein globaler Schlüssel, implizite Administratorrechte,
+  freie Rollenstrings, eine API-Key-Datenbank, Benutzerverwaltung und SSO
+  wurden ausgeschlossen. Ein Bruch von Runtime-Version 2 ohne neue
+  `schema_version` wurde ebenfalls verworfen.
+- **Konsequenzen und Trade-offs:** B.3 und spätere Management-Routen müssen vor
+  Bereitstellung den Authenticator aufbauen und für jede Operation die konkrete
+  Capability prüfen. Schlüsselrotation erfolgt zunächst durch überlappende
+  Referenzen und kontrollierte Neustarts; Hot Reload ist nicht implementiert.
+  Die HMAC-Digests vermeiden langlebige Klartextwerte im Authenticator, ersetzen
+  aber weder starke zufällige Schlüssel noch Dateirechte und sichere
+  Deployment-Prozesse. Persistence akzeptiert Version 2 und 3, weil deren
+  `persistence`-Vertrag identisch ist.
+- **Quellen:** Requirement CFG-01, CFG-03, SEC-01 bis SEC-03 und AC-10;
+  [Phase B.3.0](phases/B3-client-auth.md),
+  [Authentifizierung](../../src/oasix/auth/core.py),
+  [Konfigurationsmodelle](../../src/oasix/config/models.py)

@@ -1,5 +1,22 @@
-schema_version: 2
+schema_version: 3
 active_worker: worker-primary
+
+client_auth:
+  clients:
+    inference-client:
+      key_secrets:
+        - source: file
+          name: client_inference_key
+        - source: file
+          name: client_inference_next_key
+      permissions:
+        - inference
+    operations-client:
+      key_secrets:
+        - source: file
+          name: client_admin_key
+      permissions:
+        - administration
 
 persistence:
   database_path: /absolute/path/provided-by-deployment/oasix.sqlite3
