@@ -1,6 +1,6 @@
 # Phase A.3.2 – Strukturiertes Logging und Sicherheitsgrenzen
 
-Status: implementiert, unabhängige Review-Abnahme ausstehend
+Status: implementiert, unabhängig geprüft und freigegeben
 
 ## 1. Ziel und Abgrenzung
 
@@ -156,13 +156,14 @@ externen Logsammlers sind nicht getestet.
 ## 8. Abnahmestatus
 
 Der A.3.2-Umfang ist implementiert und lokal sowie durch Linux-CI nachgewiesen.
-Die unabhängige Code-Review-Abnahme steht noch aus. A.3.2 ist damit noch nicht
-freigegeben. Es wurde keine weitere Teilphase begonnen.
+Die Implementierung wurde auf GitHub unabhängig ohne blockierende
+Beanstandungen geprüft und freigegeben. Es wurde keine weitere Teilphase
+begonnen. Phase A insgesamt ist nicht abgeschlossen.
 
 ## 9. GitHub-Referenzen
 
-- Commits: `feat(logging): add structured secure logging foundation` auf
-  `feature/a3-worker-contracts`; vollständiger SHA im Pull Request
+- Commits: [`647ca76eb9e0f881586a78d799def684ddbe7a84`](https://github.com/madebyzwen/oasix/commit/647ca76eb9e0f881586a78d799def684ddbe7a84)
+  (`feat(logging): add structured secure logging foundation`)
 - Pull Requests: [PR #5](https://github.com/madebyzwen/oasix/pull/5), offen und
   nicht gemergt
-- CI-Läufe: [PR #5 – Checks](https://github.com/madebyzwen/oasix/pull/5/checks)
+- CI-Läufe: [Linux-CI A.3.2](https://github.com/madebyzwen/oasix/actions/runs/38000156438)

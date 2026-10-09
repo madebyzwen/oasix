@@ -32,13 +32,13 @@ Anwendungsvalidierung, sichere Persistenzfehler und Revisionsschutz. Fachliche
 Zustandsautomaten und konkrete Payload-/Adapterverträge bleiben späteren
 Phasen vorbehalten.
 
-A.3.1 ist unabhängig geprüft und implementiert die generische,
-transportneutrale Worker-Vertragsgrenze mit konfigurationsgebundener Identität,
-Zustandsbeobachtung, servicebezogener Readiness sowie vorbereitenden
-Wake-/Sleep-Ports. A.3.2 ergänzt ein implementiertes, noch nicht unabhängig
-freigegebenes JSON-Lines-Loggingfundament mit geschlossener Feld-Allowlist.
-Produktive Adapter und Orchestrierungslogik bleiben späteren Teilphasen
-vorbehalten.
+A.3.1 und A.3.2 sind unabhängig geprüft und abgeschlossen. Sie implementieren
+die generische, transportneutrale Worker-Vertragsgrenze mit
+konfigurationsgebundener Identität, Zustandsbeobachtung, servicebezogener
+Readiness und vorbereitenden Wake-/Sleep-Ports sowie ein geschlossenes
+JSON-Lines-Loggingfundament. Produktive Worker-Kommunikation, Power-Ausführung,
+operative Readiness und weitere Orchestrierungslogik bleiben späteren Phasen
+vorbehalten; Phase A des Requirements ist damit nicht insgesamt abgeschlossen.
 
 ## Pflegeregeln
 

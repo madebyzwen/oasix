@@ -1,6 +1,6 @@
 # Phase A.3.1 – Generische Worker-Verträge
 
-Status: abgenommen
+Status: implementiert, unabhängig geprüft und freigegeben
 
 ## 1. Ziel und Abgrenzung
 
@@ -138,14 +138,14 @@ Worker-Aktionen werden nicht verwendet.
 ## 8. Abnahmestatus
 
 Der A.3.1-Implementierungsumfang ist lokal umgesetzt, durch Linux-CI bestätigt
-und unabhängig geprüft und freigegeben. A.3 insgesamt und Phase A insgesamt
-sind nicht abgeschlossen; produktive Worker-Funktionen bleiben weiterhin
-späteren Teilphasen vorbehalten.
+und auf GitHub unabhängig ohne blockierende Beanstandungen geprüft und
+freigegeben. Phase A insgesamt ist nicht abgeschlossen; produktive
+Worker-Funktionen bleiben weiterhin späteren Teilphasen vorbehalten.
 
 ## 9. GitHub-Referenzen
 
-- Commits: `feat(worker): define generic worker contracts` auf
-  `feature/a3-worker-contracts`; vollständiger SHA im Pull Request
+- Commits: [`766af94962cd6fc99c42fc9fe7e784acb00f92d9`](https://github.com/madebyzwen/oasix/commit/766af94962cd6fc99c42fc9fe7e784acb00f92d9)
+  (`feat(worker): define generic worker contracts`)
 - Pull Requests: [PR #5](https://github.com/madebyzwen/oasix/pull/5), offen und
   nicht gemergt
 - CI-Läufe: [PR #5 – Checks](https://github.com/madebyzwen/oasix/pull/5/checks)

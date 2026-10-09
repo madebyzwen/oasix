@@ -384,7 +384,7 @@ ausdrücklich noch nicht implementierte Entscheidungen.
 
 ## OASIX-DEC-016 – Geschlossene JSON-Lines-Logging-Grenze
 
-- **Status:** In A.3.2 implementiert; unabhängige Review-Abnahme ausstehend
+- **Status:** In A.3.2 implementiert, unabhängig geprüft und freigegeben
 - **Kontext:** Control Plane, Worker-Kommunikation und spätere Komponenten
   benötigen korrelierbare strukturierte Logs, ohne Secrets, Payloads,
   Providerantworten oder beliebige Python-Objekte zu serialisieren. Globale
