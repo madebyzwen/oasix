@@ -5,9 +5,16 @@ from typing import Any
 
 import pytest
 from sqlalchemy import select, update
-from sqlalchemy.exc import IntegrityError
 
-from oasix.persistence import Attempt, ControlState, Job, JobEvent, Lease, WorkerState
+from oasix.persistence import (
+    Attempt,
+    ControlState,
+    Job,
+    JobEvent,
+    Lease,
+    PersistenceIntegrityError,
+    WorkerState,
+)
 
 WORKER_ID = "worker-primary"
 JOB_ID = "00000000-0000-4000-8000-000000000001"
@@ -120,7 +127,7 @@ def _seed_worker_and_jobs(database: Any, *job_ids: str) -> None:
 
 
 def _expect_integrity_error(database: Any, statement: Any, parameters: dict[str, Any]) -> None:
-    with pytest.raises(IntegrityError):
+    with pytest.raises(PersistenceIntegrityError):
         with database.transaction() as session:
             session.execute(statement, parameters)
 
@@ -554,7 +561,7 @@ def test_sensitive_rejected_value_is_hidden_from_exception(
 ) -> None:
     sentinel = "SENTINEL-SENSITIVE-EXECUTION-REFERENCE"
     _seed_worker_and_jobs(migrated_database, JOB_ID)
-    with pytest.raises(IntegrityError) as captured:
+    with pytest.raises(PersistenceIntegrityError) as captured:
         with migrated_database.transaction() as session:
             session.execute(
                 Attempt.__table__.insert(),
@@ -567,7 +574,7 @@ def test_sensitive_rejected_value_is_hidden_from_exception(
 
 
 def test_constraint_failure_rolls_back_related_inserts(migrated_database: Any) -> None:
-    with pytest.raises(IntegrityError):
+    with pytest.raises(PersistenceIntegrityError):
         with migrated_database.transaction() as session:
             session.execute(WorkerState.__table__.insert(), _worker_values())
             session.execute(Job.__table__.insert(), _job_values(version=0))

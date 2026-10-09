@@ -15,6 +15,8 @@ from oasix.config import BootstrapSettings, RuntimeConfig
 from oasix.persistence import (
     PersistenceConfigurationError,
     PersistenceInitializationError,
+    PersistenceIntegrityError,
+    PersistenceLockingError,
     initialize_persistence,
 )
 from oasix.persistence import database as database_module
@@ -112,6 +114,35 @@ def test_applies_configured_busy_timeout(
         database.close()
 
 
+def test_busy_timeout_raises_safe_locking_error_without_retry(
+    valid_config_data: dict[str, Any],
+    tmp_path: Path,
+    secret_directory: Path,
+) -> None:
+    valid_config_data["persistence"]["busy_timeout_ms"] = 25
+    database = initialize_persistence(
+        _runtime(valid_config_data),
+        _bootstrap(tmp_path, secret_directory),
+    )
+    try:
+        with database.connection() as connection, connection.begin():
+            connection.execute(text("CREATE TABLE lock_test (value INTEGER NOT NULL)"))
+
+        with database.connection() as locking_connection, locking_connection.begin():
+            locking_connection.execute(text("INSERT INTO lock_test (value) VALUES (1)"))
+            with pytest.raises(PersistenceLockingError) as captured:
+                with database.transaction() as session:
+                    session.execute(text("INSERT INTO lock_test (value) VALUES (2)"))
+            locking_connection.rollback()
+
+        assert "database is locked" not in str(captured.value).lower()
+        assert "INSERT" not in repr(captured.value)
+        with database.connection() as connection:
+            assert connection.execute(text("SELECT count(*) FROM lock_test")).scalar_one() == 0
+    finally:
+        database.close()
+
+
 def test_enforces_foreign_keys_on_distinct_connections(
     valid_config_data: dict[str, Any],
     tmp_path: Path,
@@ -194,7 +225,7 @@ def test_sql_error_representation_hides_bound_parameters(
                 {"value": sentinel},
             )
 
-        with pytest.raises(IntegrityError) as captured:
+        with pytest.raises(PersistenceIntegrityError) as captured:
             with database.transaction() as session:
                 session.execute(
                     text("INSERT INTO unique_values (value) VALUES (:value)"),

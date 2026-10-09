@@ -15,8 +15,14 @@ from sqlalchemy import inspect, text
 
 from alembic import command
 from oasix.config import BootstrapSettings, RuntimeConfig
-from oasix.persistence import Base, PersistenceMigrationError, initialize_persistence
-from oasix.persistence.migrations import verify_database_integrity
+from oasix.persistence import (
+    EXPECTED_SCHEMA_REVISION,
+    Base,
+    PersistenceMigrationError,
+    PersistenceRepositories,
+    initialize_persistence,
+)
+from oasix.persistence.migrations import verify_database_integrity, verify_schema_revision
 
 EXPECTED_ALL_TABLES = {
     "alembic_version",
@@ -27,7 +33,7 @@ EXPECTED_ALL_TABLES = {
     "leases",
     "worker_states",
 }
-EXPECTED_REVISION = "0001_a2_2"
+EXPECTED_REVISION = EXPECTED_SCHEMA_REVISION
 
 
 def _run_command(config: Config, database: Any, operation: str, revision: str) -> None:
@@ -110,6 +116,38 @@ def test_integrity_checks_and_foreign_keys_on_distinct_connections(
         assert first.execute(text("PRAGMA foreign_key_check")).all() == []
         assert first.execute(text("PRAGMA integrity_check")).scalar_one() == "ok"
         verify_database_integrity(first)
+        verify_schema_revision(second)
+
+
+def test_revision_check_rejects_missing_version_table_without_creating_it(
+    persistence_database: Any,
+) -> None:
+    with persistence_database.connection() as connection:
+        with pytest.raises(PersistenceMigrationError, match="Revision"):
+            verify_schema_revision(connection)
+        assert "alembic_version" not in inspect(connection).get_table_names()
+
+
+@pytest.mark.parametrize("revision", ["0000_stale", "unknown_revision"])
+def test_revision_check_rejects_incompatible_revision_before_domain_writes(
+    migrated_database: Any,
+    revision: str,
+) -> None:
+    with migrated_database.connection() as connection, connection.begin():
+        connection.execute(
+            text("UPDATE alembic_version SET version_num = :revision"), {"revision": revision}
+        )
+
+    with pytest.raises(PersistenceMigrationError, match="Revision"):
+        with migrated_database.transaction() as session:
+            PersistenceRepositories(session)
+
+    with migrated_database.connection() as connection:
+        assert connection.execute(text("SELECT count(*) FROM jobs")).scalar_one() == 0
+        assert (
+            connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
+            == revision
+        )
 
 
 def test_integrity_failure_is_reported_without_row_contents(migrated_database: Any) -> None:

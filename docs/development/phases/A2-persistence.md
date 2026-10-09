@@ -1,6 +1,6 @@
 # Phase A.2 – Datenbankdesign und Architekturplanung
 
-Status: **Design abgeschlossen – A.2.1 und A.2.2 implementiert, A.2.3 offen**
+Status: **Design abgeschlossen – A.2.1 bis A.2.3 implementiert, Review ausstehend**
 
 ## 1. Ziel und Abgrenzung
 
@@ -11,16 +11,17 @@ aus Python 3.12, SQLite im WAL-Modus, SQLAlchemy 2, Alembic und pytest.
 Dieses Dokument ist der finalisierte Entwurf nach abgeschlossenem
 Architektur-Review. A.2.1 setzt Runtime-Schema v2, die sichere Pfadprüfung und
 das SQLAlchemy-/SQLite-Fundament um. A.2.2 ergänzt exakt sechs Fachtabellen und
-eine Alembic-Initialmigration. Queue-Dispatch, Retry, Recovery, Lease-Ablauf
-und Power-Steuerung werden hier nur durch Persistenzverträge vorbereitet; ihre
-Geschäftslogik und vollständigen Zustandsautomaten folgen in späteren Phasen
-nach separater Freigabe.
+eine Alembic-Initialmigration. A.2.3 ergänzt Session-gebundene Repositories,
+zentrale Nutzdatenvalidierung, sichere Persistenzfehler und den lesenden
+Revisionsschutz. Queue-Dispatch, Retry, Recovery, Lease-Ablauf und
+Power-Steuerung werden hier nur durch Persistenzverträge vorbereitet; ihre
+Geschäftslogik und vollständigen Zustandsautomaten folgen in späteren Phasen.
 
 | Etappe | Status | Umfang |
 | --- | --- | --- |
 | A.2.1 | Implementiert; Review ausstehend | Runtime-Version 2, Datenbankpfadprüfung, Engine, Pflicht-Pragmas, begrenzter Pool, Session- und Transaktionslebenszyklus |
 | A.2.2 | Implementiert; Review ausstehend | Sechs SQLAlchemy-Kerntabellen, benannte Constraints und Indizes, Initialrevision `0001_a2_2` sowie Integritätsprüfungen |
-| A.2.3 | Offen | Repository-Grenzen, zentrale Nutzdatenvalidierung und verbleibende A.2-Integritätsnachweise |
+| A.2.3 | Implementiert; Review ausstehend | Session-gebundene Repositories, zentrale Pydantic-Validierung, sichere Fehlerkategorien, Revisionsschutz und verbleibende A.2-Integritätsnachweise |
 
 ## 2. Verbindliche Anforderungen
 
@@ -53,10 +54,9 @@ verbleibende Geschäftsentscheidungen ausdrücklich als offen.
 
 ### 3.1 Komponenten und Verantwortungsgrenzen
 
-Die synchrone SQLAlchemy-2-Persistenzschicht innerhalb der Control Plane ist in
-A.2.1 bis einschließlich Engine, Session Factory und generischem
-Transaktionskontext umgesetzt. Fachliche Repositories und Use Cases sind noch
-geplant:
+Die synchrone SQLAlchemy-2-Persistenzschicht innerhalb der Control Plane ist
+bis einschließlich Engine, Session Factory, Transaktionskontext und
+grundlegenden Repositories umgesetzt. Fachliche Use Cases sind noch geplant:
 
 ```text
 API / Dispatcher / Recovery / Power-Steuerung
@@ -76,6 +76,10 @@ API / Dispatcher / Recovery / Power-Steuerung
 - Sessions sind kurzlebig und an einen Request beziehungsweise Use Case
   gebunden; es gibt keine globale Session.
 - Repositories kapseln SQL, rufen aber nie selbst `commit()` auf.
+- `PersistenceRepositories` erhält eine caller-eigene `Session`, prüft die
+  erwartete Revision lesend und stellt getrennte Zugriffe für alle sechs
+  Entitäten bereit. Lesezugriffe erzeugen keine Zeilen; `job_events` ist über
+  die normale Schnittstelle ausschließlich append-only.
 - Use-Case-Services besitzen die Transaktionsgrenze und committen oder rollen
   den gesamten fachlichen Zustandswechsel zurück.
 - Netzwerk-, Readiness-, Wake-/Sleep- und Agent-Aufrufe finden nie innerhalb
@@ -203,7 +207,8 @@ Exceptions oder Logs aufnehmen.
 | `extra_metrics_json` | Höchstens 65.536 UTF-8-Bytes; valides JSON-Objekt mit höchstens acht Verschachtelungsebenen und validierten technischen Schlüsseln. Es ergänzt nur Metriken und darf keine Kernfelder, Nutzinhalte oder Secrets spiegeln. |
 | `job_events.metadata_json` | Höchstens 16.384 UTF-8-Bytes; valides JSON-Objekt aus einer Allowlist je `event_type`. Keine freien Objekt-Dumps, Payloads, Rohantworten, Referenz-Tokens oder Zugangsdaten. |
 
-Diese Regeln werden an der Service-/Repository-Grenze zentral durchgesetzt.
+Diese Regeln werden seit A.2.3 an der Repository-Grenze zentral durch
+`RepositoryValidation` durchgesetzt.
 JSON-Felder dürfen nur über typisierte, feldbeschränkte Modelle geschrieben
 werden; eine generische Secret-Heuristik gilt nicht als Sicherheitsgarantie.
 Sichere Validierungsfehler nennen Feld, Regel und Limit, aber weder den Wert
@@ -211,7 +216,14 @@ noch Auszüge daraus. Da SQLite deklarierte `VARCHAR`-Längen nicht erzwingt,
 spiegelt die Migration alle genannten Byte-Obergrenzen zusätzlich in benannten
 `CHECK(length(CAST(feld AS BLOB)) <= limit)`-Constraints. Typspezifische
 JSON-Schemata, Verschachtelung und Inhaltsverbote bleiben
-Anwendungsverantwortung.
+Anwendungsverantwortung. `PayloadSchemaRegistry` akzeptiert nur explizit
+registrierte, auch verschachtelt geschlossene Pydantic-Modelle mit
+`extra="forbid"`; unbekannte Job-/Eventtypen und ungeprüfte Objektfelder
+schlagen geschlossen fehl. Das Repository enthält noch keine fachlich
+freigegebenen Job- oder Eventtypen. Bis deren Feldverträge vorliegen, bleibt
+die Registry leer und entsprechende Schreibvorgänge werden kontrolliert
+abgewiesen. Dasselbe gilt für optionale `extra_metrics`, solange kein
+geschlossenes Metrikmodell bereitgestellt wird.
 
 Für `execution_ref` akzeptiert die Anwendung nur das ausdrücklich als
 nicht geheim deklarierte Referenzfeld eines Runtime-Adapters, keine URL und
@@ -219,6 +231,14 @@ kein Authentifizierungsfeld. Liefert ein Backend ausschließlich ein Token oder
 eine credential-haltige URL, muss der Adapter daraus außerhalb dieser Tabelle
 eine sichere Referenz bilden oder den Wert ablehnen. Eine Mustererkennung
 vermeintlicher Tokens wird nicht als Sicherheitskontrolle verwendet.
+
+`result_ref`, `execution_ref` und `continuation_ref` werden ohne einen
+feldspezifischen `NonSecretReferenceAdapter` abgewiesen. Ein registrierter
+Adapter muss den unveränderten, ausdrücklich nicht geheimen Wert bestätigen;
+die zentrale Schicht erzwingt zusätzlich Bytegrenzen und weist Userinfo,
+Query/Fragment sowie für `execution_ref` sämtliche URLs ab. Konkrete
+Result-/Runtime-/Continuation-Adapterverträge fehlen weiterhin und sind daher
+nicht freigeschaltet.
 
 Die SQLite-Datei enthält damit weiterhin potenziell sensible Nutzdaten. Datei,
 WAL, SHM, Snapshots und Backups unterliegen denselben Zugriffsregeln. Ergebnisse
@@ -618,10 +638,12 @@ Die Session Factory verwendet SQLAlchemy-2-Stil und `expire_on_commit=False`.
 Normale A.2-Transaktionstests verwenden `Session.begin()`. Eine spätere
 `BEGIN IMMEDIATE`-Primitive für den Queue-Claim gehört zum Dispatcher und wird
 nicht in A.2.1 vorweggenommen. Die Initialisierung übersetzt Verbindungs- und
-Pfadfehler in sichere technische Fehlertypen. Die an den späteren Use-Case-
-Grenzen erforderliche Übersetzung eines nach Ablauf des Busy-Timeouts
-verbleibenden `SQLITE_BUSY`, DB-Lock-Retry und fachlicher Job-Retry sind noch
-nicht implementiert.
+Pfadfehler in sichere technische Fehlertypen. Seit A.2.3 übersetzen auch die
+Session-/Transaktionsgrenzen Verbindungs-, Integritäts- und Operationsfehler.
+Ein nach Ablauf des Busy-Timeouts verbleibendes `SQLITE_BUSY` oder
+`SQLITE_LOCKED` wird ohne SQL-Parameter und ohne automatischen Retry als
+`PersistenceLockingError` gemeldet. Fachlicher Job-Retry bleibt
+unimplementiert.
 
 Diese Werte sind bewusst konservative Startannahmen für eine einzelne Control
 Plane und kein adaptiver Tuning-Mechanismus. Der kleine Pool begrenzt offene
@@ -699,6 +721,12 @@ beschriebene Produktions-Restore-Verfahren.
   `integrity_check` und Schema-Smoke-Test.
 - Die Anwendung schlägt geschlossen fehl, wenn DB-Revision und erwarteter Head
   nicht übereinstimmen.
+- A.2.3 stellt dafür `verify_schema_revision()` bereit. Die Prüfung liest nur
+  `alembic_version`, migriert nicht, erzeugt keine Tabellen und lehnt fehlende,
+  veraltete, unbekannte oder mehrdeutige Revisionen ab. Das
+  `PersistenceRepositories`-Aggregat führt diese Prüfung vor Freigabe
+  fachlicher Zugriffe aus; die vollständige Startup-/Recovery-Orchestrierung
+  bleibt späteren Phasen vorbehalten.
 - Downgrades werden entwickelt und getestet, sind aber keine garantierte
   Produktionsrollback-Strategie. Nicht sicher reversible Änderungen erfordern
   Restore von Anwendungsversion und Backup.
@@ -761,9 +789,8 @@ Offsite-Ablage und numerische Backup-Retention bleiben offene Betriebsfragen.
 
 ## 6. Tests und Nachweise
 
-Die A.2.1- und A.2.2-Tests verwenden ausschließlich temporäre lokale
-Datenbanken. Der verbleibende Anwendungsumfang wird erst mit A.2.3
-nachgewiesen.
+Die A.2.1- bis A.2.3-Tests verwenden ausschließlich temporäre lokale
+Datenbanken und benötigen weder Netzwerkzugriffe noch reale Secret-Dateien.
 
 ### A.2.1 – implementiert und lokal nachgewiesen
 
@@ -801,6 +828,23 @@ nachgewiesen.
 - `foreign_key_check`, `integrity_check`, Revisionsprüfung, sichere
   SQL-Parameterdarstellung und Fail-Closed-Test bei fehlendem `json_valid`.
 
+### A.2.3 – implementiert und lokal nachgewiesen
+
+- Session-gebundene Repositories für alle sechs Entitäten, Lesezugriffe ohne
+  Seiteneffekte, caller-eigene Transaktionen und append-only Eventzugriff,
+- atomare Mehr-Repository-Transaktionen, vollständiger Rollback sowie
+  vorab geprüfte Job-/Attempt-Korrelation für Events und Leases,
+- kanonische UUIDv4, Status-/Identifier-/Zeit-/Dauervalidierung, deterministische
+  JSON-Objekte, alle UTF-8-Bytegrenzen und maximal acht Metrikebenen,
+- explizite, geschlossene Job-/Event-/Metrikschema-Verträge und kontrollierte
+  Ablehnung unbekannter oder noch nicht definierter Typen,
+- feldspezifische, standardmäßig geschlossene Referenzadapter sowie
+  redigierte Validierungs-, Integritäts-, Verbindungs- und Lockingfehler,
+- lesende Prüfung des einzigen kompatiblen Alembic-Heads sowie Ablehnung
+  fehlender, veralteter und unbekannter Revisionen vor Repository-Schreibzugriff,
+- tatsächlicher Lock-Konflikt über getrennte SQLite-Verbindungen sowie erneute
+  Integritäts-, Foreign-Key- und Engine-Neustartnachweise.
+
 ### Gesamtabnahme A.2 – verpflichtend
 
 - **Runtime-Konfiguration Version 2:** gültige Version-2-Konfiguration,
@@ -834,11 +878,11 @@ mehrere Verbindungen erforderlich sind, werden tatsächlich getrennte
 Verbindungen verwendet; eine einzelne In-Memory-Verbindung belegt weder
 Poolverhalten noch Persistenz.
 
-Die Datenbankconstraints für JSON-Syntax und Byte-Limits sind mit A.2.2
-implementiert. Typspezifische JSON-Allowlist-Modelle, inhaltliche Verbote für
-Secrets beziehungsweise authentifizierende Referenzen und sichere
-Repository-Fehler folgen in A.2.3; sie werden nicht als bereits umgesetzt
-dargestellt.
+Die Datenbankconstraints für JSON-Syntax und Byte-Limits stammen aus A.2.2;
+A.2.3 ergänzt die davorliegende typisierte Anwendungskontrolle. Konkrete
+fachliche Payload-, Event-, Metrik- und Referenzadapterverträge sind bewusst
+nicht erfunden worden. Bis zu ihrer Freigabe werden die betroffenen Werte
+geschlossen abgewiesen.
 
 ### Spätere Phasen
 
@@ -926,18 +970,19 @@ zugehörigen fachlichen Verträgen.
 ## 8. Abnahmestatus
 
 Der Architektur-Review ist abgeschlossen und der A.2-Entwurf ist
-**designseitig freigegeben**. A.2.1 ist abgeschlossen. A.2.2 ist implementiert
-und lokal geprüft; die unabhängige Code-Review-Abnahme steht noch aus. A.2.3
-bleibt offen und benötigt eine separate Freigabe.
+**designseitig freigegeben**. A.2.1 bis A.2.3 sind implementiert und lokal
+geprüft; die unabhängige Code-Review-Abnahme für den aktuellen Feature-Branch
+steht noch aus.
 
 Das vorhandene Fundament belegt Konfigurations-, Verbindungs-, Schema-,
-Migrations- und Datenbankintegritätseigenschaften, aber noch keine Repositories,
-fachliche Transitionen, Recovery oder Produktionsreife.
+Migrations-, Repository- und Datenbankintegritätseigenschaften, aber noch keine
+fachlichen Transitionen, Recovery oder Produktionsreife.
 
 ## 9. GitHub-Referenzen
 
 - Design-Pull-Request:
   [PR #3 – docs: design A2 persistence architecture](https://github.com/madebyzwen/oasix/pull/3)
 - A.2.1-Implementierungs-Commit: `cba7be6`
-- A.2.2-Implementierungs-Commit und zugehöriger CI-Lauf: werden mit diesem
-  Arbeitsauftrag erzeugt
+- A.2.2-Implementierungs-Commit: `09ea7f3`
+- A.2.3-Implementierung: PR #4 auf `feature/a2-persistence`; Commit und CI-Lauf
+  werden mit diesem Arbeitsauftrag erzeugt

@@ -17,12 +17,11 @@ festgelegte Umfang implementiert und geprüft wurde.
 | A.2 – Persistenzdesign | Abgeschlossen | Der finalisierte Entwurf begrenzt die Initialmigration auf sechs Kerntabellen und legt Runtime-Schema v2, SQLite-Betrieb, Persistenzgrenzen, Idempotenz und Nutzdatenschutz fest. | [Phase A.2](phases/A2-persistence.md), [PR #3](https://github.com/madebyzwen/oasix/pull/3) |
 | A.2.1 – Runtime-Konfiguration und SQLite-Fundament | Abgeschlossen | Runtime-Schema v2, sichere Datenbankpfadprüfung, begrenzte SQLAlchemy-Engine, verifizierte SQLite-Pragmas sowie Session- und Transaktionskontexte sind implementiert und getestet. | [Phase A.2](phases/A2-persistence.md), [Commit `cba7be6`](https://github.com/madebyzwen/oasix/commit/cba7be6) |
 | A.2.2 – Schema und Initialmigration | Implementiert, Review ausstehend | Sechs SQLAlchemy-Modelle, ihre benannten Constraints und Indizes sowie die lineare Alembic-Initialrevision `0001_a2_2` sind implementiert und lokal geprüft. Runtime-Initialisierung führt keine automatische Migration aus. | [Phase A.2](phases/A2-persistence.md#4-entscheidungen-und-migrationsumfang), [Modelle](../../src/oasix/persistence/models.py), [Migration](../../alembic/versions/0001_a2_2_initial_persistence.py) |
-| A.2.3 – Persistenzzugriff und Integritätsnachweise | Offen | Repository-Grenzen, zentrale Nutzdatenvalidierung und die verbleibenden A.2-Integritätsnachweise folgen nach separater Freigabe. | [Phase A.2](phases/A2-persistence.md#6-tests-und-nachweise) |
+| A.2.3 – Persistenzzugriff und Integritätsnachweise | Implementiert, Review ausstehend | Session-gebundene Repositories, zentrale typisierte Nutzdatenvalidierung, sichere Fehlerkategorien, lesender Revisionsschutz und die verbleibenden A.2-Integritätsnachweise sind implementiert und lokal geprüft. Nicht definierte Payload- und Referenzverträge werden geschlossen abgewiesen. | [Phase A.2](phases/A2-persistence.md#6-tests-und-nachweise), [Repositories](../../src/oasix/persistence/repositories.py), [Validierung](../../src/oasix/persistence/validation.py) |
 
 Phase A des Requirements ist trotz abgeschlossener A.1 und implementiertem
-SQLite-Schema noch nicht insgesamt abgeschlossen: Repository-Grenzen,
-Anwendungsvalidierung und weitere Fundamentbestandteile folgen in späteren
-Teilphasen.
+A.2-Persistenzfundament noch nicht insgesamt abgeschlossen: Generischer Worker
+und strukturierte Logs folgen in späteren Teilphasen.
 
 ## Weitere MVP-Stufen
 

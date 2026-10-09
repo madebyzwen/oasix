@@ -7,6 +7,8 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from oasix.persistence.errors import PersistenceMigrationError
 
+EXPECTED_SCHEMA_REVISION = "0001_a2_2"
+
 
 def verify_database_integrity(connection: Connection) -> None:
     """Verify SQLite structural integrity without exposing row contents."""
@@ -22,4 +24,31 @@ def verify_database_integrity(connection: Connection) -> None:
     if foreign_key_violations is not None or integrity_result != "ok":
         raise PersistenceMigrationError(
             "Datenbankintegrität ist nach der Migration nicht gewährleistet."
+        )
+
+
+def verify_schema_revision(connection: Connection) -> None:
+    """Read and verify the single compatible Alembic revision without migrating."""
+
+    try:
+        version_table_exists = connection.exec_driver_sql(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'alembic_version'"
+        ).scalar_one_or_none()
+        if version_table_exists is None:
+            raise PersistenceMigrationError(
+                "Datenbankschema besitzt keine kompatible Alembic-Revision."
+            )
+        revisions = (
+            connection.exec_driver_sql("SELECT version_num FROM alembic_version").scalars().all()
+        )
+    except PersistenceMigrationError:
+        raise
+    except SQLAlchemyError:
+        raise PersistenceMigrationError(
+            "Datenbankrevision konnte nicht sicher verifiziert werden."
+        ) from None
+
+    if revisions != [EXPECTED_SCHEMA_REVISION]:
+        raise PersistenceMigrationError(
+            "Datenbankschema besitzt keine kompatible Alembic-Revision."
         )

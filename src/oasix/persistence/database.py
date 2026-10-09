@@ -9,7 +9,7 @@ from typing import Any, Literal
 
 from sqlalchemy import URL, Engine, create_engine, event
 from sqlalchemy.engine import Connection
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, OperationalError, SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import QueuePool
 
@@ -17,7 +17,11 @@ from oasix.config import BootstrapSettings, RuntimeConfig
 from oasix.persistence.errors import (
     PersistenceConfigurationError,
     PersistenceConnectionError,
+    PersistenceError,
     PersistenceInitializationError,
+    PersistenceIntegrityError,
+    PersistenceLockingError,
+    PersistenceOperationError,
 )
 from oasix.persistence.paths import (
     PreparedDatabasePath,
@@ -67,15 +71,33 @@ class PersistenceDatabase:
 
         self._require_open()
         with self._session_factory() as session:
-            yield session
+            try:
+                yield session
+            except PersistenceError:
+                raise
+            except SQLAlchemyError as error:
+                session.rollback()
+                translated = _translate_sqlalchemy_error(error)
+            else:
+                return
+        raise translated from None
 
     @contextmanager
     def transaction(self) -> Iterator[Session]:
         """Commit a short transaction on success and roll it back on failure."""
 
         self._require_open()
-        with self._session_factory() as session, session.begin():
-            yield session
+        with self._session_factory() as session:
+            try:
+                with session.begin():
+                    yield session
+            except PersistenceError:
+                raise
+            except SQLAlchemyError as error:
+                translated = _translate_sqlalchemy_error(error)
+            else:
+                return
+        raise translated from None
 
     def close(self) -> None:
         """Dispose pooled connections; repeated calls are harmless."""
@@ -201,6 +223,28 @@ def _verify_required_sqlite_json(cursor: sqlite3.Cursor) -> None:
     cursor.execute("SELECT json_valid('{}'), json_valid('{')")
     if cursor.fetchone() != (1, 0):
         raise _PragmaInitializationError
+
+
+def _translate_sqlalchemy_error(error: SQLAlchemyError) -> PersistenceError:
+    """Map driver failures to stable errors without retaining SQL parameters."""
+
+    if isinstance(error, IntegrityError):
+        return PersistenceIntegrityError("Persistenzintegrität wurde verletzt.")
+    if isinstance(error, OperationalError):
+        if _is_sqlite_lock_error(error):
+            return PersistenceLockingError(
+                "SQLite blieb nach Ablauf des konfigurierten Timeouts gesperrt."
+            )
+        return PersistenceConnectionError("SQLite-Verbindung konnte nicht sicher verwendet werden.")
+    return PersistenceOperationError("Persistenzoperation konnte nicht sicher ausgeführt werden.")
+
+
+def _is_sqlite_lock_error(error: OperationalError) -> bool:
+    original = error.orig
+    error_code = getattr(original, "sqlite_errorcode", None)
+    if not isinstance(error_code, int):
+        return False
+    return error_code & 0xFF in {sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED}
 
 
 def _raise_initialization_error(status: _InitializationStatus) -> None:

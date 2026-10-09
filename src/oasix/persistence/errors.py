@@ -19,3 +19,19 @@ class PersistenceInitializationError(PersistenceError):
 
 class PersistenceMigrationError(PersistenceError):
     """A schema migration or its integrity verification failed safely."""
+
+
+class PersistenceValidationError(PersistenceError):
+    """Repository input did not satisfy a safe persistence contract."""
+
+
+class PersistenceIntegrityError(PersistenceError):
+    """A database or cross-entity integrity rule was violated."""
+
+
+class PersistenceLockingError(PersistenceError):
+    """SQLite remained locked after its configured busy timeout."""
+
+
+class PersistenceOperationError(PersistenceError):
+    """A database operation failed without exposing driver details."""

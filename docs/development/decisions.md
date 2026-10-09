@@ -176,8 +176,9 @@ ausdrücklich noch nicht implementierte Entscheidungen.
 
 ## OASIX-DEC-009 – Explizite Transaktionen und versionierte Alembic-Migrationen
 
-- **Status:** Akzeptiert; Engine und Transaktionskontext in A.2.1 sowie Alembic-
-  Initialmigration in A.2.2 implementiert; fachliche Transaktionen ausstehend
+- **Status:** Akzeptiert; Engine und Transaktionskontext in A.2.1, Alembic-
+  Initialmigration in A.2.2 sowie Repository- und Revisionsgrenzen in A.2.3
+  implementiert; fachliche Zustandsautomaten ausstehend
 - **Kontext:** Job-/Attempt-Übergänge, Lease-Operationen und Recovery dürfen bei
   Abstürzen keinen teilweise aktualisierten Zustand hinterlassen. Das Schema
   muss gemäß JOB-04 migrationsfähig sein.
@@ -198,6 +199,7 @@ ausdrücklich noch nicht implementierte Entscheidungen.
 - **Quellen:** Requirement JOB-04;
   [Phase-A.2-Design](phases/A2-persistence.md),
   [Persistence-Initialisierung](../../src/oasix/persistence/database.py),
+  [Repositories](../../src/oasix/persistence/repositories.py),
   [Alembic-Umgebung](../../alembic/env.py),
   [Alembic-Batch-Dokumentation](https://alembic.sqlalchemy.org/en/latest/batch.html)
 
@@ -315,3 +317,32 @@ ausdrücklich noch nicht implementierte Entscheidungen.
   [Engine-Implementierung](../../src/oasix/persistence/database.py),
   [Pfadprüfung](../../src/oasix/persistence/paths.py),
   [PR #3](https://github.com/madebyzwen/oasix/pull/3)
+
+## OASIX-DEC-014 – Geschlossene Nutzdaten- und Referenzverträge
+
+- **Status:** Akzeptiert und in A.2.3 implementiert; konkrete Fachschemata und
+  Adapterverträge ausstehend
+- **Kontext:** Die sechs Kerntabellen besitzen flexible JSON- und
+  Referenzfelder. Freie Objekt-Dumps oder beliebige angeblich sichere
+  Referenzstrings würden Secrets, instabile Providerdaten und unkontrollierte
+  Formate in die Control-Plane-Persistenz tragen.
+- **Gewählte Lösung:** Repository-Schreibzugriffe durchlaufen eine gemeinsame
+  Pydantic-v2-Validierung. Job- und Eventtypen verwenden eine explizite
+  Registry vollständig geschlossener Schemata; optionale Zusatzmetriken
+  benötigen ebenfalls ein geschlossenes Modell. Nicht leere Result-,
+  Execution- und Continuation-Referenzen benötigen jeweils einen ausdrücklich
+  registrierten, feldspezifischen Nicht-Secret-Adapter. Ohne freigegebenen
+  Vertrag schlägt der Schreibzugriff geschlossen fehl.
+- **Begründung:** A.2.3 kann Struktur, Grenzen und Fehlerredaktion absichern,
+  ohne noch nicht entschiedene Jobtypen, Eventtypen oder Adapterformate zu
+  erfinden. Eine Secret-Schlüsselwortsuche wird nicht als Sicherheitsgarantie
+  eingesetzt.
+- **Berücksichtigte Alternativen:** Beliebiges valides JSON, offene Pydantic-
+  Modelle, freie Referenzstrings und Token-Heuristiken wurden ausgeschlossen.
+- **Konsequenzen und Trade-offs:** Neue fachliche Typen sind erst nutzbar,
+  nachdem ihre Schemata beziehungsweise Adapter explizit registriert wurden.
+  Bytegrenzen und geschlossene Modelle ersetzen weder fachliche Datenklassifikation
+  noch Zugriffs-, Backup- und Logging-Schutz.
+- **Quellen:** Requirement SEC-03, OBS-03, OBS-04 und AC-10;
+  [Phase-A.2-Design](phases/A2-persistence.md#52-schutz-persistierter-nutzdaten),
+  [Validierung](../../src/oasix/persistence/validation.py)

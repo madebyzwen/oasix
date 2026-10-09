@@ -203,7 +203,7 @@ Secret-Validierung verwendet:
 
 ```python
 from oasix.config import load_startup_configuration
-from oasix.persistence import initialize_persistence
+from oasix.persistence import PersistenceRepositories, initialize_persistence
 
 configuration = load_startup_configuration()
 with initialize_persistence(
@@ -211,9 +211,17 @@ with initialize_persistence(
     configuration.bootstrap,
 ) as database:
     with database.transaction() as session:
-        # Fachliche Schreiboperationen folgen in späteren A.2-Etappen.
-        pass
+        repositories = PersistenceRepositories(session)
 ```
+
+Repositories verwenden ausschließlich die von außen bereitgestellte Session
+und führen selbst weder `commit()` noch `rollback()` aus. Das Aggregat prüft
+vor fachlichen Zugriffen lesend die erwartete Alembic-Revision. Seine leere
+Standard-Registry weist Job-/Event-Payloads, Zusatzmetriken und nicht leere
+Result-/Execution-/Continuation-Referenzen geschlossen ab. Spätere Komponenten
+müssen dafür explizite, geschlossene Pydantic-Schemata beziehungsweise
+feldspezifische, nicht geheime Adapterverträge bereitstellen; A.2.3 erfindet
+keine fachlichen Formate vorzeitig.
 
 Die Initialisierung reserviert beziehungsweise prüft eine reguläre
 Datenbankdatei descriptorbasiert, lehnt Symlink-Ziele und Pfade innerhalb der

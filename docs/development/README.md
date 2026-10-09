@@ -25,9 +25,10 @@ Vorgaben konkreten Implementierungsphasen zu und unterscheiden dabei zwischen:
 
 Das A.2-Design ist abgeschlossen. A.2.1 implementiert Runtime-Schema v2 und das
 SQLite-/SQLAlchemy-Fundament; A.2.2 implementiert die sechs Kerntabellen und
-die Alembic-Initialmigration. Repository-Grenzen, zentrale
-Anwendungsvalidierung und fachliche Persistenzabläufe bleiben A.2.3
-beziehungsweise späteren Phasen vorbehalten.
+die Alembic-Initialmigration; A.2.3 implementiert Repository-Grenzen, zentrale
+Anwendungsvalidierung, sichere Persistenzfehler und Revisionsschutz. Fachliche
+Zustandsautomaten und konkrete Payload-/Adapterverträge bleiben späteren
+Phasen vorbehalten.
 
 ## Pflegeregeln
 
