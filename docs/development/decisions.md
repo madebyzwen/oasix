@@ -80,38 +80,52 @@ ausdrücklich noch nicht implementierte Entscheidungen.
 
 ## OASIX-DEC-005 – SQLite als geplante MVP-Persistenz
 
-- **Status:** Geplant, noch nicht implementiert; in A.2 zu bestätigen
+- **Status:** Für das A.2-Design als Ziel festgelegt; Implementierung und
+  Produktionsvalidierung ausstehend
 - **Kontext:** Jobs, Attempts, Queues, Leases, Control-State und zuordenbare
   Telemetrie benötigen eine transaktionale, migrationsfähige Persistenz auf der
   Control Plane.
-- **Gewählte Lösung:** SQLite wird als vorläufiges MVP-Ziel für Phase A.2
-  geführt. Datenmodell, Bibliotheksintegration und Migrationen existieren noch
-  nicht.
+- **Gewählte Lösung:** Für den Single-Control-Plane-MVP ist SQLite im WAL-Modus
+  mit SQLAlchemy 2 und Alembic vorgesehen. Die Datenbank liegt auf einem lokalen
+  Dateisystem der Control Plane; Netzwerkdateisysteme sind ausgeschlossen.
 - **Begründung:** Eine lokale transaktionale Datenbank erfüllt den im Requirement
-  beschriebenen MVP-Rahmen ohne zusätzlichen Betriebsdienst.
-- **Berücksichtigte Alternativen:** Das Requirement lässt andere lokale
-  transaktionale Datenbanken zu und nennt SQLite nur als Beispiel. Eine
-  endgültige Abwägung ist in der A.2-Änderung zu dokumentieren.
-- **Konsequenzen und Trade-offs:** Bis zur Bestätigung in A.2 ist dies eine
-  reversible Planungsentscheidung. Es dürfen keine Aussagen über bereits
-  vorhandene Tabellen, Migrationen oder Recovery-Funktionen abgeleitet werden.
+  beschriebenen MVP-Rahmen ohne zusätzlichen Datenbankdienst. WAL erlaubt
+  parallele Leser während eines Schreibers; kurze Transaktionen passen zum
+  erwarteten niedrigen Schreibvolumen.
+- **Berücksichtigte Alternativen:** PostgreSQL unterstützt mehrere konkurrierende
+  Writer, Zeilensperren, bessere horizontale Skalierung und etablierte HA-
+  Verfahren, benötigt aber einen separat betriebenen Dienst. Es wird erneut
+  bewertet, sobald mehrere Control-Plane-Instanzen, hohe Schreiblast oder HA
+  erforderlich werden.
+- **Konsequenzen und Trade-offs:** SQLite bleibt Single-Writer. Schreibende
+  Transaktionen müssen kurz sein, Lock-Konflikte begrenzt behandelt und
+  WAL-sichere Backups verwendet werden. SQLAlchemy kapselt den Zugriff, ersetzt
+  aber keine spätere Datenmigration zu PostgreSQL. Anwendungscode, Migrationen
+  und Datenbankdateien existieren noch nicht.
 - **Quellen:** Requirement JOB-03, JOB-04 und Abschnitt 13;
-  [Roadmap](roadmap.md)
+  [Phase-A.2-Design](phases/A2-persistence.md),
+  [SQLite-WAL-Dokumentation](https://www.sqlite.org/wal.html)
 
 ## OASIX-DEC-006 – Kein zusätzlicher Message-Broker im MVP
 
-- **Status:** Verbindliche MVP-Vorgabe; noch nicht implementiert
+- **Status:** Verbindliche MVP-Vorgabe; Queue-Ausgestaltung vorgeschlagen und
+  noch nicht implementiert
 - **Kontext:** Die asynchrone Jobverwaltung soll persistent sein, ohne für das
   MVP einen weiteren Infrastrukturservice vorauszusetzen.
-- **Gewählte Lösung:** Die geplante Queue wird DB-basiert umgesetzt; ein externer
-  Message-Broker ist im MVP nicht erforderlich.
+- **Gewählte Lösung:** Die Queue wird als Abfrage auf `jobs.status` und
+  `next_eligible_at` modelliert. Es gibt keine zweite Queue-Tabelle. Ein kurzer,
+  serialisierter Claim-Vorgang aktualisiert den Job und legt den nächsten
+  Attempt atomar an; Netzwerk- oder Worker-Aufrufe finden erst nach Commit statt.
 - **Begründung:** Dies hält Deployment und Betrieb der ersten Ausbaustufe
   schlank.
 - **Berücksichtigte Alternativen:** Ein externer Broker ist nicht grundsätzlich
   für spätere Phasen ausgeschlossen, für den MVP aber nicht vorgesehen.
-- **Konsequenzen und Trade-offs:** Dispatch-, Sperr- und Recovery-Semantik müssen
-  in der Persistenzschicht sauber gelöst werden. Dazu existiert noch kein Code.
-- **Quellen:** Requirement Abschnitt 1.1 und JOB-03 bis JOB-05
+- **Konsequenzen und Trade-offs:** SQLite bietet keine Broker-Benachrichtigung
+  und keine Zeilensperren. Der Dispatcher benötigt Polling und für den Claim
+  eine kurze `BEGIN IMMEDIATE`-Transaktion. Hohe Queue-Parallelität wäre ein
+  Wechselkriterium zu PostgreSQL oder einem späteren Broker.
+- **Quellen:** Requirement Abschnitt 1.1 und JOB-03 bis JOB-05;
+  [Phase-A.2-Design](phases/A2-persistence.md)
 
 ## OASIX-DEC-007 – GitHub Actions als unabhängige Linux-CI
 
@@ -155,3 +169,49 @@ ausdrücklich noch nicht implementierte Entscheidungen.
 - **Quellen:** [secrets.py](../../src/oasix/config/secrets.py),
   [README](../../README.md#konfigurationsfundament),
   [Commit `c4bdf95`](https://github.com/madebyzwen/oasix/commit/c4bdf9527a117468c61132607a9baa82e8f8a0b5)
+
+## OASIX-DEC-009 – Explizite Transaktionen und versionierte Alembic-Migrationen
+
+- **Status:** Im A.2-Entwurf vorgeschlagen; Review und Implementierung ausstehend
+- **Kontext:** Job-/Attempt-Übergänge, Lease-Operationen und Recovery dürfen bei
+  Abstürzen keinen teilweise aktualisierten Zustand hinterlassen. Das Schema
+  muss gemäß JOB-04 migrationsfähig sein.
+- **Gewählte Lösung:** Eine gekapselte SQLAlchemy-2-Engine stellt kurzlebige
+  Sessions bereit. Use-Case-Services definieren Transaktionsgrenzen; Repositories
+  führen kein eigenständiges `commit()` aus. Alembic ist die einzige Quelle für
+  Produktionsschemaänderungen. Constraints erhalten Namen und SQLite-Umbauten
+  verwenden geprüfte Batch-Migrationen.
+- **Begründung:** Fachlich zusammengehörige Zustandswechsel werden atomar und
+  das Schema bleibt reproduzierbar versioniert.
+- **Berücksichtigte Alternativen:** Implizite Commits, `create_all()` beim
+  Produktionsstart und ungeprüfte Autogenerate-Migrationen wurden verworfen.
+- **Konsequenzen und Trade-offs:** Migrationen laufen vor dem Anwendungsstart in
+  einem exklusiven Wartungsfenster. Vor destruktiven Upgrades ist ein getestetes
+  Backup erforderlich; Produktionsrollbacks erfolgen primär durch Restore.
+- **Quellen:** Requirement JOB-04;
+  [Phase-A.2-Design](phases/A2-persistence.md),
+  [Alembic-Batch-Dokumentation](https://alembic.sqlalchemy.org/en/latest/batch.html)
+
+## OASIX-DEC-010 – Persistenzgrenzen und Lease-Autorität
+
+- **Status:** Im A.2-Entwurf vorgeschlagen; Review und Implementierung ausstehend
+- **Kontext:** Die Control Plane benötigt persistenten Betriebszustand, darf
+  aber Konfiguration nicht duplizieren oder parallele Aktivitätszähler führen.
+- **Gewählte Lösung:** Die externe Runtime-Konfiguration bleibt autoritativ für
+  Worker-Profile, Dienste und Policies. Persistiert werden Identitäten,
+  beobachteter Worker-/Service-State, Jobs, Attempts, Leases, Control-/Power-
+  Operationen, Recovery-Referenzen und zuordenbare Telemetrie. Aktive Nutzung
+  wird ausschließlich aus nicht freigegebenen, noch nicht abgelaufenen Leases
+  ermittelt; ein `active_lease_count` wird nicht gespeichert.
+- **Begründung:** Diese Grenze vermeidet widersprüchliche Konfigurationskopien
+  und erfüllt die Lease-Invariante aus v3.4.
+- **Berücksichtigte Alternativen:** Persistierte Worker-Verbindungsdaten und
+  separate Request-/Job-Aktivitätszähler wurden ausgeschlossen.
+- **Konsequenzen und Trade-offs:** Beim Start müssen Konfiguration und
+  persistierte IDs abgeglichen werden. Abgelaufene Leases gelten bereits vor
+  ihrer späteren Bereinigung als inaktiv. Sämtliche Zeiten werden als UTC-
+  Epoch-Mikrosekunden gespeichert; eine verlässliche Control-Plane-Uhr ist
+  betriebliche Voraussetzung.
+- **Quellen:** Requirement CFG-02, JOB-01 bis JOB-05, LSE-01 bis LSE-04,
+  OBS-01 bis OBS-04 und REC-01 bis REC-04;
+  [Phase-A.2-Design](phases/A2-persistence.md)
