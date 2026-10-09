@@ -129,6 +129,9 @@ pytest-Suite, Ruff-Linting, den Ruff-Format-Check und einen Import-Smoke-Test au
 Sie verwendet weder Repository-Secrets noch selbst gehostete Runner und führt
 kein Deployment durch.
 
+Der aktuelle Umsetzungsstand, technische Entscheidungen und Phasenabnahmen sind
+in der [Entwicklungsdokumentation](docs/development/README.md) nachvollziehbar.
+
 ## Verbindliche Grundlage
 
 Die vollständigen Architektur-, Sicherheits- und Akzeptanzanforderungen stehen
