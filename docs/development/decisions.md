@@ -80,7 +80,7 @@ ausdrücklich noch nicht implementierte Entscheidungen.
 
 ## OASIX-DEC-005 – SQLite als geplante MVP-Persistenz
 
-- **Status:** Für das A.2-Design als Ziel festgelegt; Implementierung und
+- **Status:** Im konsolidierten A.2-Design festgelegt; Implementierung und
   Produktionsvalidierung ausstehend
 - **Kontext:** Jobs, Attempts, Queues, Leases, Control-State und zuordenbare
   Telemetrie benötigen eine transaktionale, migrationsfähige Persistenz auf der
@@ -100,8 +100,9 @@ ausdrücklich noch nicht implementierte Entscheidungen.
 - **Konsequenzen und Trade-offs:** SQLite bleibt Single-Writer. Schreibende
   Transaktionen müssen kurz sein, Lock-Konflikte begrenzt behandelt und
   WAL-sichere Backups verwendet werden. SQLAlchemy kapselt den Zugriff, ersetzt
-  aber keine spätere Datenmigration zu PostgreSQL. Anwendungscode, Migrationen
-  und Datenbankdateien existieren noch nicht.
+  aber keine spätere Datenmigration zu PostgreSQL. Die erste Migration bleibt
+  auf sechs fachliche Kerntabellen begrenzt; Anwendungscode, Migrationen und
+  Datenbankdateien existieren noch nicht.
 - **Quellen:** Requirement JOB-03, JOB-04 und Abschnitt 13;
   [Phase-A.2-Design](phases/A2-persistence.md),
   [SQLite-WAL-Dokumentation](https://www.sqlite.org/wal.html)
@@ -172,7 +173,7 @@ ausdrücklich noch nicht implementierte Entscheidungen.
 
 ## OASIX-DEC-009 – Explizite Transaktionen und versionierte Alembic-Migrationen
 
-- **Status:** Im A.2-Entwurf vorgeschlagen; Review und Implementierung ausstehend
+- **Status:** Im konsolidierten A.2-Design festgelegt; Implementierung ausstehend
 - **Kontext:** Job-/Attempt-Übergänge, Lease-Operationen und Recovery dürfen bei
   Abstürzen keinen teilweise aktualisierten Zustand hinterlassen. Das Schema
   muss gemäß JOB-04 migrationsfähig sein.
@@ -180,7 +181,9 @@ ausdrücklich noch nicht implementierte Entscheidungen.
   Sessions bereit. Use-Case-Services definieren Transaktionsgrenzen; Repositories
   führen kein eigenständiges `commit()` aus. Alembic ist die einzige Quelle für
   Produktionsschemaänderungen. Constraints erhalten Namen und SQLite-Umbauten
-  verwenden geprüfte Batch-Migrationen.
+  verwenden geprüfte Batch-Migrationen. Die Initialmigration enthält genau
+  `jobs`, `attempts`, `leases`, `worker_states`, `control_state` und
+  `job_events`; weitere Fachtabellen folgen nur mit ihren Komponenten.
 - **Begründung:** Fachlich zusammengehörige Zustandswechsel werden atomar und
   das Schema bleibt reproduzierbar versioniert.
 - **Berücksichtigte Alternativen:** Implizite Commits, `create_all()` beim
@@ -194,24 +197,81 @@ ausdrücklich noch nicht implementierte Entscheidungen.
 
 ## OASIX-DEC-010 – Persistenzgrenzen und Lease-Autorität
 
-- **Status:** Im A.2-Entwurf vorgeschlagen; Review und Implementierung ausstehend
+- **Status:** Im konsolidierten A.2-Design festgelegt; Implementierung ausstehend
 - **Kontext:** Die Control Plane benötigt persistenten Betriebszustand, darf
   aber Konfiguration nicht duplizieren oder parallele Aktivitätszähler führen.
 - **Gewählte Lösung:** Die externe Runtime-Konfiguration bleibt autoritativ für
-  Worker-Profile, Dienste und Policies. Persistiert werden Identitäten,
-  beobachteter Worker-/Service-State, Jobs, Attempts, Leases, Control-/Power-
-  Operationen, Recovery-Referenzen und zuordenbare Telemetrie. Aktive Nutzung
-  wird ausschließlich aus nicht freigegebenen, noch nicht abgelaufenen Leases
-  ermittelt; ein `active_lease_count` wird nicht gespeichert.
+  Worker-Profile, Dienste und Policies. Die sechs Kerntabellen persistieren
+  Jobs, Attempts, Leases, beobachteten Worker-State, Control-State,
+  Recovery-Referenzen und zuordenbare Job-Events. Service-State,
+  Job-Abhängigkeiten/-Serviceanforderungen und Power-Operationen werden erst mit
+  ihren späteren Komponenten ergänzt. Aktive Nutzung wird ausschließlich aus
+  nicht freigegebenen, noch nicht abgelaufenen Leases ermittelt; ein
+  `active_lease_count` wird nicht gespeichert.
 - **Begründung:** Diese Grenze vermeidet widersprüchliche Konfigurationskopien
   und erfüllt die Lease-Invariante aus v3.4.
 - **Berücksichtigte Alternativen:** Persistierte Worker-Verbindungsdaten und
   separate Request-/Job-Aktivitätszähler wurden ausgeschlossen.
 - **Konsequenzen und Trade-offs:** Beim Start müssen Konfiguration und
   persistierte IDs abgeglichen werden. Abgelaufene Leases gelten bereits vor
-  ihrer späteren Bereinigung als inaktiv. Sämtliche Zeiten werden als UTC-
-  Epoch-Mikrosekunden gespeichert; eine verlässliche Control-Plane-Uhr ist
+  ihrer späteren Bereinigung als inaktiv. Die kleinere Initialmigration
+  vermeidet vorzeitig festgelegte Service-/Power-Semantik, verlangt dafür
+  gezielte Folgemigrationen vor deren Nutzung. Sämtliche Zeiten werden als
+  UTC-Epoch-Mikrosekunden gespeichert; eine verlässliche Control-Plane-Uhr ist
   betriebliche Voraussetzung.
 - **Quellen:** Requirement CFG-02, JOB-01 bis JOB-05, LSE-01 bis LSE-04,
   OBS-01 bis OBS-04 und REC-01 bis REC-04;
   [Phase-A.2-Design](phases/A2-persistence.md)
+
+## OASIX-DEC-011 – Runtime-Schema Version 2 für Persistenz
+
+- **Status:** Im konsolidierten A.2-Design festgelegt; Implementierung ausstehend
+- **Kontext:** Die bisherige Runtime-Version 1 enthält Worker, Services und
+  Policies, aber keinen sicheren, extern konfigurierten Datenbankpfad. Ein
+  stiller Default oder eine neue Bootstrap-Variable würde die vorhandene
+  Versions- beziehungsweise Quellengrenze verletzen.
+- **Gewählte Lösung:** Runtime-`schema_version: 2` ergänzt eine strikt
+  validierte `persistence`-Sektion mit absolutem lokalem `database_path` und
+  begrenztem `busy_timeout_ms`. Bootstrap bleibt unverändert auf YAML- und
+  Secret-Quelle beschränkt. Die persistenzfähige Control Plane weist Version 1
+  ausdrücklich ab; sie deutet Version 1 weder um noch ergänzt sie automatisch.
+- **Begründung:** Der DB-Pfad bleibt installationsspezifische Runtime-
+  Konfiguration, während die Versionsgrenze eine vollständige Startup-
+  Validierung ohne versteckte Defaults ermöglicht.
+- **Berücksichtigte Alternativen:** Fest codierter Pfad, Datenbank-URL,
+  automatische Version-1-Aufwertung und eine weitere `OASIX_`-
+  Umgebungsvariable wurden verworfen.
+- **Konsequenzen und Trade-offs:** Deployments müssen ihre YAML manuell auf
+  Version 2 anheben. Der Zielpfad benötigt ein lokales persistentes Volume,
+  restriktive Rechte und Platz für DB, WAL und SHM. Version 1 behält bis zur
+  A.2-Implementierung unverändert ihre bisherige Bedeutung; der aktuelle Code
+  wird in diesem Designschritt nicht geändert.
+- **Quellen:** Requirement CFG-01, CFG-02, JOB-03 und JOB-04;
+  [Phase-A.2-Design](phases/A2-persistence.md#511-runtime-konfiguration-schema_version-2)
+
+## OASIX-DEC-012 – Scope-bezogene, digestbasierte Job-Idempotenz
+
+- **Status:** Im konsolidierten A.2-Design festgelegt; API-Implementierung und
+  Retention-Frist ausstehend
+- **Kontext:** Ein global eindeutiger, im Klartext gespeicherter
+  `idempotency_key` kollidiert zwischen unabhängigen Clients und vergrößert die
+  Datenschutz- und Logging-Risiken.
+- **Gewählte Lösung:** `jobs` speichert einen internen Caller-/Tenant-Scope,
+  den 32-Byte-SHA-256-Digest eines zufälligen, opaken Schlüssels und einen
+  Request-Fingerprint. Ein partieller Unique-Index gilt für Scope plus Digest.
+  Rohschlüssel und Auth-Identität werden weder persistiert noch geloggt.
+- **Begründung:** Die Datenbank erkennt Wiederholungen auch nach Neustart,
+  trennt aber unabhängige Identitätsräume. Der Fingerprint ermöglicht der
+  späteren API, denselben Schlüssel mit abweichender Payload sicher als
+  Konflikt abzulehnen.
+- **Berücksichtigte Alternativen:** Globale Eindeutigkeit, Klartextschlüssel und
+  ausschließlich flüchtige Deduplizierung wurden verworfen. Eine eigene
+  Tombstone-Tabelle wird nicht in die erste Migration aufgenommen.
+- **Konsequenzen und Trade-offs:** Der API-Vertrag verlangt Erzeugung aus
+  mindestens 128 Bit Zufall; serverseitig prüfbar sind nur Format und Länge.
+  Stabile Scope-Ableitung und kanonische Fingerprints sind verbindlich zu
+  definieren. Die Idempotenzzuordnung endet zunächst mit der kontrollierten
+  Löschung der Jobzeile; numerische Retention und ein möglicher längerer
+  Replay-Schutz bleiben vor der Job-API zu entscheiden.
+- **Quellen:** Requirement JOB-01, SEC-01, SEC-03 und AC-10;
+  [Phase-A.2-Design](phases/A2-persistence.md#512-idempotenzvertrag)

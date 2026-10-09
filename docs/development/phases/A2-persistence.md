@@ -8,11 +8,12 @@ Phase A.2 plant eine lokale, transaktionale und migrationsfähige Persistenz fü
 die OASIX-Control-Plane. Der vorgesehene Stack besteht aus Python 3.12, SQLite
 im WAL-Modus, SQLAlchemy 2, Alembic und pytest.
 
-Dieses Dokument ist ein Review-Entwurf. Es wurden weder Anwendungscode noch
-Dependencies, Datenbankdateien oder Alembic-Migrationen angelegt. Queue-
-Dispatch, Retry, Recovery, Lease-Ablauf und Power-Steuerung werden hier nur als
-Persistenzverträge beschrieben; ihre Geschäftslogik folgt nach separater
-Freigabe.
+Dieses Dokument ist ein konsolidierter Review-Entwurf. Es wurden weder
+Anwendungscode noch Dependencies, Datenbankdateien oder Alembic-Migrationen
+angelegt. Die erste Migration ist auf sechs fachliche Kerntabellen begrenzt.
+Queue-Dispatch, Retry, Recovery, Lease-Ablauf und Power-Steuerung werden hier
+nur durch Persistenzverträge vorbereitet; ihre Geschäftslogik und vollständigen
+Zustandsautomaten folgen in späteren Phasen nach separater Freigabe.
 
 ## 2. Verbindliche Anforderungen
 
@@ -22,24 +23,24 @@ Maßgeblich ist das
 | Bereich | Verbindliche Invariante für das Design |
 | --- | --- |
 | ARC-01, DEP-01 | Persistenz und Control-State liegen dauerhaft auf der Control Plane. |
-| JOB-01 | `job_id` bleibt stabil; `parent_job_id` und `idempotency_key` werden ohne späteren Schemaumbau ermöglicht. |
+| JOB-01 | `job_id` bleibt stabil; Parent-Bezug und optionale Idempotenz werden ohne späteren Umbau der Tabelle `jobs` ermöglicht. |
 | JOB-02 | Jeder konkrete Ausführungsversuch erhält eine eigene `attempt_id`; ein Retry überschreibt keinen Attempt. |
 | JOB-03 | Queue, Job-Status und Attempts überleben einen Prozessneustart. |
 | JOB-04 | Schemaänderungen sind versioniert und migrationsfähig. |
 | JOB-05, REC-01, REC-02 | Aktive Jobs und Attempts werden nach Neustart abgeglichen; unbestätigte Attempts bleiben nicht stillschweigend `RUNNING`. |
 | REC-03, REC-04 | Job-/Wake-Retries sind begrenzt; Fehlerklassen bleiben stabil auswertbar. |
-| WRK-01 bis WRK-05 | Worker startet nach Control-Plane-Start logisch als `UNKNOWN`; Readiness ist servicebezogen und Dispatch setzt Worker-/Service-Readiness voraus. |
-| LSE-01 bis LSE-04 | Jede Nutzung besitzt eine Lease mit TTL/Heartbeat; die Lease Registry ist die einzige Autorität für aktive Nutzung. |
+| WRK-01 bis WRK-05 | Worker startet logisch als `UNKNOWN`; Dispatch setzt reale Worker- und Service-Readiness voraus. |
+| LSE-01 bis LSE-04 | Jede aktive Nutzung besitzt eine Lease mit TTL/Heartbeat; die Lease Registry ist die einzige Autorität für aktive Nutzung. |
 | PWR-01 | Sleep setzt keine aktive Lease, keine ausführbare/fällige Arbeit, abgelaufene Idle-Zeit und einen zulässigen Worker-State voraus. |
 | Force Sleep | Neuer Dispatch wird pausiert, Grace Period und Eingriff werden festgehalten, nicht sauber beendete Attempts werden `INTERRUPTED`. |
 | WAITING/EXTERNAL | Eine Lease darf erst nach bestätigter Resumability und persistierter opaker `continuation_ref` freigegeben werden. |
-| OBS-01 bis OBS-04 | IDs und verfügbare Attempt-Telemetrie sind korrelierbar; fehlende Werte bleiben `NULL`; Erweiterungen dürfen stabile Kernfelder nicht ersetzen. |
+| OBS-01 bis OBS-04 | IDs und verfügbare Attempt-Telemetrie sind korrelierbar; fehlende Werte bleiben `NULL`; Erweiterungen ersetzen keine Kernfelder. |
 | AC-04 bis AC-07 | Lease-Ablauf, Restart-Recovery, Force-Sleep-Unterbrechung und abrufbare Telemetrie müssen später testbar sein. |
 
-Das Requirement definiert Job- und Worker-Zustände, jedoch keine vollständigen
-Attempt-, Service-, Power- oder Recovery-Zustandsautomaten. Die in diesem
-Dokument vorgeschlagenen zusätzlichen Statuswerte bleiben bis zur
-Implementierungsfreigabe Designentscheidungen.
+Das Requirement legt die Job- und Worker-Zustände fest, aber keinen vollständigen
+Attempt-Zustandsautomaten und keine exakten Retention-Zeiten. Dieses Dokument
+trifft nur die für das Schema notwendigen Entscheidungen und kennzeichnet
+verbleibende Geschäftsentscheidungen ausdrücklich als offen.
 
 ## 3. Architektur und Schnittstellen
 
@@ -71,8 +72,8 @@ API / Dispatcher / Recovery / Power-Steuerung
 - Netzwerk-, Readiness-, Wake-/Sleep- und Agent-Aufrufe finden nie innerhalb
   einer offenen DB-Transaktion statt.
 - Runtime-Konfiguration bleibt die Quelle für Worker-Verbindungsdaten, Services
-  und Policies. Die Datenbank speichert keine Hostnamen, Zugangsdaten oder
-  Secret-Werte.
+  und Policies. Die Datenbank speichert keine Hostnamen, Zugangsdaten,
+  Secret-Werte oder Kopien der Worker-Konfiguration.
 
 ### 3.2 SQLite gegenüber PostgreSQL
 
@@ -84,14 +85,13 @@ API / Dispatcher / Recovery / Power-Steuerung
 | Ausfallsicherheit | Lokale Datei; HA und Replikation sind nicht eingebaut. | Replikation, HA- und PITR-Ökosystem | HA ist kein aktueller MVP-Umfang. |
 | Dateisystem | WAL benötigt alle Zugriffe auf demselben Host und ist für Netzwerkdateisysteme ungeeignet. | Netzwerkdienst; Storage wird vom DB-Betrieb gekapselt. | SQLite-Datei muss auf einem lokalen persistenten Volume liegen. |
 | Migrationen | Viele Schemaänderungen benötigen Alembic Batch/„move and copy“. | Umfangreichere native `ALTER TABLE`-Funktionen | Für das kleine MVP-Schema vertretbar, aber migrationskritisch. |
-| Backup | SQLite Backup API oder `VACUUM INTO`; WAL darf nicht ignoriert werden. | Etablierte logische/physische Backup-Werkzeuge | SQLite ist beherrschbar, wenn das Verfahren fest operationalisiert wird. |
+| Backup | SQLite Backup API oder `VACUUM INTO`; WAL darf nicht ignoriert werden. | Etablierte logische/physische Backup-Werkzeuge | SQLite ist beherrschbar, wenn das Verfahren operationalisiert wird. |
 
-PostgreSQL wird neu bewertet, wenn mindestens eines der folgenden Kriterien
-eintritt: mehrere aktive Control-Plane-Writer, anhaltende `SQLITE_BUSY`-
-Konflikte trotz kurzer Transaktionen, hoher Queue-Durchsatz, geforderte HA/
-Remote-DB oder ein Backup-/RPO-Ziel, das mit einer lokalen Datei nicht
-vertretbar erreichbar ist. SQLAlchemy reduziert Dialektkopplung, macht
-Queue-Locking, Datentypen und Datenmigration aber nicht automatisch portabel.
+PostgreSQL wird neu bewertet, wenn mehrere aktive Control-Plane-Writer,
+anhaltende `SQLITE_BUSY`-Konflikte, hoher Queue-Durchsatz, HA/Remote-DB oder ein
+mit einer lokalen Datei nicht erreichbares RPO/RTO verlangt werden. SQLAlchemy
+reduziert Dialektkopplung, macht Queue-Locking, Datentypen und Datenmigration
+aber nicht automatisch portabel.
 
 Grundlagen: [SQLite WAL](https://www.sqlite.org/wal.html),
 [SQLAlchemy SQLite](https://docs.sqlalchemy.org/en/20/dialects/sqlite.html) und
@@ -101,89 +101,132 @@ Grundlagen: [SQLite WAL](https://www.sqlite.org/wal.html),
 
 Die Queue ist keine separate Tabelle und kein zweiter Statusspeicher. Ein Job
 ist ausführbar, wenn sein `status` `QUEUED` oder `RETRY_WAIT` ist und sein
-`next_eligible_at` erreicht wurde. Bei einem neuen `QUEUED`-Job entspricht
-dieser Wert dem frühesten gewünschten Startzeitpunkt. Ein partieller
-Fälligkeitsindex unterstützt die gemeinsame Abfrage beider Statuswerte.
+`next_eligible_at` erreicht wurde. Bei einem neuen `QUEUED`-Job entspricht der
+Wert dem frühesten gewünschten Startzeitpunkt.
 
 Der geplante Claim-Ablauf ist:
 
 1. Eine kurze SQLite-`BEGIN IMMEDIATE`-Transaktion serialisiert konkurrierende
-   Writer früh und vermeidet einen späteren Lock-Upgrade-Konflikt.
+   Writer früh.
 2. Der nächste fällige Job wird deterministisch nach Fälligkeit,
    Erstellungszeit und `job_id` ausgewählt.
 3. Ein bedingtes Update mit `version` schützt vor einem veralteten Claim.
-4. In derselben Transaktion werden Jobstatus, neuer Attempt und Job-Event
+4. Jobstatus, neuer Attempt und Job-Event werden in derselben Transaktion
    geschrieben.
-5. Nach Commit beginnt Wake-up beziehungsweise Dispatch außerhalb der
-   Transaktion.
+5. Erst nach Commit beginnen Wake-up und Dispatch.
 
-Bei Abschluss werden Attempt-Telemetrie, Attempt-Endstatus und der neue
-Jobstatus atomar gespeichert. Ein Retry setzt den Job auf `RETRY_WAIT`; erst
-beim nächsten tatsächlichen Claim entsteht der nächste Attempt. Ein optionaler
-In-Process-Hinweis kann den Poller wecken, ist aber niemals die dauerhafte
-Queue-Quelle. Nach Neustart genügt die DB-Abfrage, um fällige Arbeit wieder zu
-finden.
+Bei Abschluss werden Attempt-Telemetrie, Attempt-Endstatus und neuer Jobstatus
+atomar gespeichert. Ein Retry setzt den Job auf `RETRY_WAIT`; erst beim nächsten
+tatsächlichen Claim entsteht ein neuer Attempt. Ein optionaler In-Process-Hinweis
+kann den Poller wecken, ist aber niemals die dauerhafte Queue-Quelle. SQLite
+ersetzt im MVP keinen Broker für hohe Parallelität, verteilte Consumer oder
+Push-Benachrichtigung.
 
-SQLite ist dafür im MVP geeignet, solange Schreibtransaktionen kurz bleiben und
-die Last niedrig ist. Es ersetzt nicht die Fähigkeiten eines Brokers für hohe
-Parallelität, verteilte Consumer oder Push-Benachrichtigung.
+## 4. Entscheidungen und Migrationsumfang
 
-## 4. Entscheidungen
+Die langfristigen Entscheidungen stehen knapp im
+[Entscheidungsregister](../decisions.md). Dieses Dokument enthält das konkrete
+Schema und die Betriebsverträge.
 
-Die maßgeblichen Einträge stehen im
-[Entscheidungsregister](../decisions.md):
+Die erste Alembic-Migration erzeugt genau diese sechs fachlichen Tabellen:
 
-- OASIX-DEC-005: SQLite/WAL für den Single-Control-Plane-MVP,
-- OASIX-DEC-006: DB-basierte Queue ohne zusätzlichen Broker,
-- OASIX-DEC-009: explizite Transaktionen und Alembic-Migrationen,
-- OASIX-DEC-010: Persistenzgrenzen und Lease-Autorität.
+1. `jobs`
+2. `attempts`
+3. `leases`
+4. `worker_states`
+5. `control_state`
+6. `job_events`
 
-Dieses Phasendokument enthält das detaillierte Schema und Betriebsdesign; das
-Register hält nur die langfristig relevanten Entscheidungen und Trade-offs.
+Alembics technische Tabelle `alembic_version` wird vom Migrationswerkzeug
+verwaltet und ist keine OASIX-Fachtabelle. Die Initialmigration legt außerdem
+die Singleton-Zeile in `control_state` an.
 
-## 5. Umsetzung – geplanter Designentwurf
+Folgende fünf fachlichen Tabellen gehören ausdrücklich **nicht** zur ersten
+Migration und werden erst zusammen mit der jeweils verantwortlichen
+Geschäftskomponente entworfen und migriert:
+
+- `job_dependencies`
+- `job_service_requirements`
+- `service_states`
+- `power_operations`
+- `power_attempts`
+
+## 5. Geplanter Designentwurf
 
 ### 5.1 Gemeinsame Datenkonventionen
 
 - Primär-IDs werden von der Anwendung als kanonische UUID-Strings erzeugt und
-  als `VARCHAR(36)` gespeichert. Die genaue UUID-Version ist noch offen.
-- `worker_id`, `service_id`, Rollen und technische Arten verwenden validierte,
-  generische Identifikatoren; keine Infrastrukturbezeichnung wird im Schema
-  fest codiert.
+  als `VARCHAR(36)` gespeichert. Die konkrete UUID-Version bleibt vor der
+  Implementierung festzulegen.
+- `worker_id`, Rollen und technische Arten verwenden validierte, generische
+  Identifikatoren; keine Infrastrukturbezeichnung wird fest codiert.
 - Sämtliche Zeitpunkte werden als `BIGINT`/SQLite `INTEGER` in UTC-
-  Epoch-Mikrosekunden gespeichert. `NULL` bedeutet „von der Quelle nicht
-  geliefert“ und wird nicht geschätzt.
+  Epoch-Mikrosekunden gespeichert. `NULL` bedeutet „nicht geliefert oder nicht
+  eingetreten“ und wird nicht geschätzt.
 - Dauern werden als nicht negative `BIGINT`-Millisekunden gespeichert.
 - Statuswerte liegen als `VARCHAR` mit benannten `CHECK`-Constraints vor.
-- Flexible Payloads und `extra_metrics` sind kanonisches JSON in `TEXT`; ihre
-  Struktur und Größe werden vor dem Schreiben validiert.
-- Alle Foreign Keys und Constraints erhalten stabile Namen. Foreign Keys sind
-  standardmäßig `ON DELETE RESTRICT`; reine Zuordnungstabellen dürfen bei einer
-  später explizit freigegebenen Job-Löschung kaskadieren.
-- Es gibt keine persistierten Aktivitätszähler. Ableitbare Werte wie aktive
-  Leases oder laufende Attempts werden abgefragt.
+- JSON liegt kanonisch UTF-8-codiert in `TEXT`. Die Anwendung prüft Schema,
+  Verschachtelung und Byte-Limit vor dem Schreiben; die Migration ergänzt
+  `CHECK(json_valid(...))`. Die Engine-Initialisierung muss die benötigten
+  SQLite-JSON-Funktionen prüfen und bei deren Fehlen geschlossen fehlschlagen.
+- Alle Foreign Keys und Constraints erhalten stabile Namen. Foreign Keys
+  verwenden `ON DELETE RESTRICT`; ein späterer Retention-Use-Case löscht
+  abhängige Zeilen bewusst und atomar.
+- Es gibt keine persistierten Aktivitätszähler. Aktive Leases und laufende
+  Attempts werden aus ihren Zeilen ermittelt.
 
-### 5.2 Beziehungsübersicht
+### 5.2 Schutz persistierter Nutzdaten
+
+Die folgenden Limits gelten für die UTF-8- beziehungsweise Binärdarstellung vor
+dem Datenbankschreibvorgang. Die Grenzprüfung darf den abgelehnten Wert nicht in
+Exceptions oder Logs aufnehmen.
+
+| Feld | Persistenzvertrag und maximales Volumen |
+| --- | --- |
+| `input_payload_json` | Höchstens 1.048.576 UTF-8-Bytes; valides JSON-Objekt, zusätzlich gegen ein typspezifisches Schema mit verbotenen unbekannten Feldern validiert. Auth-Header, private Schlüssel, Passwörter und andere Zugangsdaten sind unzulässig. Größere Eingaben müssen später extern gespeichert und sicher referenziert werden. |
+| `result_ref` | Höchstens 2.048 UTF-8-Bytes; ausschließlich eine opake, nicht authentifizierende Referenz. Ergebnisinhalt und unkontrollierte Provider-Rohantworten werden nicht in `jobs` gespeichert. Credential-haltige URLs sind verboten. |
+| `continuation_ref` | Höchstens 4.096 UTF-8-Bytes; opake, nicht authentifizierende Wiederaufnahmereferenz. Ist der Runtime-Zustand selbst geheim oder größer, muss er extern geschützt gespeichert werden; die DB enthält dann nur dessen Referenz. Das Feld wird nie geloggt. |
+| `error_detail_redacted` | Höchstens 8.192 UTF-8-Bytes; ausschließlich redigierte Diagnose. Keine Rohantwort, kein Stack-Dump, kein Request-Payload und keine Header. Fehlerklasse und sicherer Fehlercode bleiben separate Felder. |
+| `extra_metrics_json` | Höchstens 65.536 UTF-8-Bytes; valides JSON-Objekt mit höchstens acht Verschachtelungsebenen und validierten technischen Schlüsseln. Es ergänzt nur Metriken und darf keine Kernfelder, Nutzinhalte oder Secrets spiegeln. |
+| `job_events.metadata_json` | Höchstens 16.384 UTF-8-Bytes; valides JSON-Objekt aus einer Allowlist je `event_type`. Keine freien Objekt-Dumps, Payloads, Rohantworten, Referenz-Tokens oder Zugangsdaten. |
+
+Diese Regeln werden an der Service-/Repository-Grenze zentral durchgesetzt.
+JSON-Felder dürfen nur über typisierte, feldbeschränkte Modelle geschrieben
+werden; eine generische Secret-Heuristik gilt nicht als Sicherheitsgarantie.
+Sichere Validierungsfehler nennen Feld, Regel und Limit, aber weder den Wert
+noch Auszüge daraus. Da SQLite deklarierte `VARCHAR`-Längen nicht erzwingt,
+spiegelt die Migration alle genannten Byte-Obergrenzen zusätzlich in benannten
+`CHECK(length(CAST(feld AS BLOB)) <= limit)`-Constraints. Typspezifische
+JSON-Schemata, Verschachtelung und Inhaltsverbote bleiben
+Anwendungsverantwortung.
+
+Die SQLite-Datei enthält damit weiterhin potenziell sensible Nutzdaten. Datei,
+WAL, SHM, Snapshots und Backups unterliegen denselben Zugriffsregeln. Ergebnisse
+werden außerhalb dieser sechs Tabellen gespeichert; die Wahl und Absicherung
+eines Result Stores ist eine spätere Architekturentscheidung.
+
+### 5.3 Beziehungsübersicht
 
 ```text
-jobs ──< attempts ──< leases
+jobs ──< attempts
   │          │
   ├──< job_events
-  ├──< job_dependencies >── jobs
-  └──< job_service_requirements
-
-worker_states ──< service_states
-       ├──< attempts
-       ├──< leases
-       └──< power_operations ──< power_attempts
+  └──< leases >── worker_states
+             ▲           ▲
+             └─ attempts ┘
 
 control_state: genau eine globale Zeile
 ```
 
-### 5.3 Tabelle `jobs`
+`job_events.attempt_id` und `leases.attempt_id` sind optional. Wo sowohl Job-
+als auch Attempt-Bezug gesetzt sind, muss der Attempt zum genannten Job gehören.
+Diese tabellenübergreifende Invariante wird im jeweiligen atomaren Use Case
+geprüft; sie rechtfertigt keinen redundanten Aktivitätszähler.
 
-**Zweck:** Stabile Job-Identität, Queue-Zustand, Warten, Retry-Fälligkeit und
-Resultatreferenz.
+### 5.4 Tabelle `jobs`
+
+**Zweck:** Stabile Job-Identität, Queue-Zustand, Warten, Retry-Fälligkeit,
+Idempotenznachweis und externe Resultatreferenz.
 
 | Spalte | SQL-Typ | Null | Bedeutung |
 | --- | --- | --- | --- |
@@ -192,64 +235,53 @@ Resultatreferenz.
 | `role` | `VARCHAR(63)` | ja | Logische Agent-/Jobrolle, soweit vorhanden |
 | `status` | `VARCHAR(16)` | nein | Verbindlicher Jobstatus |
 | `parent_job_id` | `VARCHAR(36)` | ja | Self-FK auf übergeordneten Job |
-| `idempotency_key` | `VARCHAR(255)` | ja | Optionaler Wiederholungsschutz; Scope offen |
+| `idempotency_scope` | `VARCHAR(128)` | ja | Interner, nicht geheimer Caller-/Tenant-Namespace |
+| `idempotency_key_digest` | `BLOB` | ja | 32-Byte-SHA-256-Digest, nie der Rohschlüssel |
+| `request_fingerprint` | `BLOB` | ja | 32-Byte-Digest des kanonischen semantischen Requests |
 | `request_id` | `VARCHAR(128)` | ja | Korrelation mit eingehender Anfrage |
-| `input_payload_json` | `TEXT` | nein | Validierte, providerneutrale Jobeingabe |
-| `result_ref` | `TEXT` | ja | Opaque Referenz auf ein Ergebnis |
+| `input_payload_json` | `TEXT` | nein | Validierte providerneutrale Jobeingabe |
+| `result_ref` | `VARCHAR(2048)` | ja | Opaque Referenz auf ein extern gespeichertes Ergebnis |
 | `wait_kind` | `VARCHAR(8)` | ja | `LOCAL` oder `EXTERNAL` bei `WAITING` |
-| `continuation_ref` | `TEXT` | ja | Opaque, persistierte Wiederaufnahmereferenz |
-| `resumability_confirmed_at` | `BIGINT` | ja | Zeitpunkt der expliziten Resumability-Bestätigung |
-| `next_eligible_at` | `BIGINT` | ja | Frühester Zeitpunkt für einen Retry/erneuten Claim |
+| `continuation_ref` | `VARCHAR(4096)` | ja | Opaque, persistierte Wiederaufnahmereferenz |
+| `resumability_confirmed_at` | `BIGINT` | ja | Explizite Bestätigung sicherer Wiederaufnahme |
+| `next_eligible_at` | `BIGINT` | ja | Frühester Zeitpunkt für Claim oder Retry |
 | `created_at`, `queued_at`, `updated_at` | `BIGINT` | nein | UTC-Zeitpunkte |
 | `finished_at` | `BIGINT` | ja | Abschlusszeit eines terminalen Jobs |
 | `version` | `INTEGER` | nein | Optimistic-Locking-Version, Startwert 1 |
 
-Zulässige Statuswerte sind verbindlich: `QUEUED`, `RUNNING`, `WAITING`,
-`RETRY_WAIT`, `BLOCKED`, `DONE`, `FAILED`, `INTERRUPTED`.
+Zulässige Statuswerte bleiben exakt die Vorgabe aus v3.4: `QUEUED`, `RUNNING`,
+`WAITING`, `RETRY_WAIT`, `BLOCKED`, `DONE`, `FAILED`, `INTERRUPTED`.
 
-Constraints und Indizes:
+Verbindliche Constraints und Indizes:
 
 - PK `job_id`; Self-FK `parent_job_id` mit `RESTRICT`.
 - `CHECK(version >= 1)` und `CHECK(parent_job_id IS NULL OR parent_job_id <> job_id)`.
-- `resumability_confirmed_at` setzt `wait_kind = 'EXTERNAL'` und eine nicht leere
-  `continuation_ref` voraus.
-- Provisorischer partieller Unique-Index auf `idempotency_key`, wenn nicht
-  `NULL`; der endgültige Scope ist eine offene Frage.
+- `queued_at >= created_at`, `updated_at >= created_at` und logisch geordnete
+  optionale Abschluss-/Wartezeitpunkte.
+- Idempotenz-Scope, Key-Digest und Request-Fingerprint sind entweder gemeinsam
+  `NULL` oder gemeinsam gesetzt; beide Digests besitzen exakt 32 Bytes.
+- Partieller Unique-Index auf `(idempotency_scope, idempotency_key_digest)`,
+  wenn die Idempotenzfelder gesetzt sind. Es gibt keinen global eindeutigen
+  Rohschlüssel.
+- `wait_kind` ist genau für `WAITING` gesetzt. Bestätigungszeit und
+  `continuation_ref` sind gemeinsam gesetzt oder `NULL`; gesetzte Werte
+  verlangen `wait_kind = 'EXTERNAL'`.
+- `next_eligible_at` ist für `QUEUED` und `RETRY_WAIT` gesetzt und für andere
+  Statuswerte `NULL`.
+- `finished_at` ist für `DONE`, `FAILED` und `INTERRUPTED` gesetzt und sonst
+  `NULL`; `BLOCKED` bleibt bewusst nicht terminal.
 - Partieller Queue-Index auf `(next_eligible_at, created_at, job_id)` für
-  `status IN ('QUEUED', 'RETRY_WAIT')`; für beide Statuswerte ist
-  `next_eligible_at` verpflichtend, sonst `NULL`.
-- Index auf `parent_job_id` und optional `request_id`.
+  `status IN ('QUEUED', 'RETRY_WAIT')`.
+- Indizes auf `parent_job_id`, `request_id` und `(status, updated_at)`.
 
-### 5.4 Tabellen `job_dependencies` und `job_service_requirements`
-
-`job_dependencies` bildet lokale Warteabhängigkeiten ohne JSON-Auswertung ab:
-
-| Spalte | SQL-Typ | Bedeutung |
-| --- | --- | --- |
-| `job_id` | `VARCHAR(36)` | FK auf wartenden Job |
-| `depends_on_job_id` | `VARCHAR(36)` | FK auf vorausgesetzten Job |
-| `created_at` | `BIGINT` | UTC-Zeitpunkt |
-
-Der zusammengesetzte PK lautet `(job_id, depends_on_job_id)`; Selbstbezüge sind
-verboten. Ein zusätzlicher Index auf `depends_on_job_id` unterstützt das
-Aufwecken abhängiger Jobs.
-
-`job_service_requirements` persistiert die für den Dispatch erforderlichen
-generischen Service-IDs:
-
-| Spalte | SQL-Typ | Bedeutung |
-| --- | --- | --- |
-| `job_id` | `VARCHAR(36)` | FK auf Job |
-| `service_id` | `VARCHAR(63)` | Generische Service-ID aus der Runtime-Konfiguration |
-| `created_at` | `BIGINT` | UTC-Zeitpunkt |
-
-Der PK ist `(job_id, service_id)`. Die Runtime-Konfiguration bleibt Quelle für
-Endpoint und Probe; diese Tabelle speichert nur die Anforderung des Jobs.
+Die Datenbank sichert Struktur und Eindeutigkeit. Welche API-Identität den
+Scope liefert, wie der Request kanonisiert wird und welche Antwort ein
+Idempotenztreffer erhält, bleibt Geschäftslogik nach Abschnitt 5.12.
 
 ### 5.5 Tabelle `attempts`
 
-**Zweck:** Unveränderliche Identität jedes konkreten Ausführungsversuchs,
-Recovery-Referenz, Ergebnis und zuordenbare Telemetrie.
+**Zweck:** Eigene Identität jedes konkreten Ausführungsversuchs,
+Recovery-Referenz und zuordenbare Telemetrie.
 
 | Spalte | SQL-Typ | Null | Bedeutung |
 | --- | --- | --- | --- |
@@ -257,58 +289,88 @@ Recovery-Referenz, Ergebnis und zuordenbare Telemetrie.
 | `job_id` | `VARCHAR(36)` | nein | FK auf stabilen Job |
 | `attempt_number` | `INTEGER` | nein | Bei 1 beginnende Sequenz je Job |
 | `worker_id` | `VARCHAR(63)` | nein | FK auf `worker_states` |
-| `status` | `VARCHAR(16)` | nein | Vorgeschlagener Attempt-Zustand |
-| `execution_ref` | `TEXT` | ja | Opaque Worker-/Runtime-Referenz für Recovery |
-| `agent_role`, `model` | `VARCHAR(255)` | ja | Tatsächlich verwendete Rolle beziehungsweise Modellkennung |
+| `status` | `VARCHAR(16)` | nein | Minimaler Attempt-Zustand |
+| `execution_ref` | `VARCHAR(2048)` | ja | Opaque, nicht authentifizierende Runtime-Referenz für Recovery |
+| `agent_role` | `VARCHAR(63)` | ja | Tatsächlich verwendete logische Rolle |
+| `model` | `VARCHAR(255)` | ja | Tatsächlich gemeldete Modellkennung |
 | `created_at`, `updated_at` | `BIGINT` | nein | UTC-Zeitpunkte |
-| `dispatched_at`, `started_at`, `first_token_at`, `finished_at` | `BIGINT` | ja | Attempt-Zeitpunkte, soweit geliefert |
+| `started_at`, `first_token_at`, `finished_at` | `BIGINT` | ja | Attempt-Zeitpunkte, soweit geliefert |
 | `queue_duration_ms`, `wake_duration_ms`, `execution_duration_ms` | `BIGINT` | ja | Nicht negative Dauerwerte |
 | `input_tokens`, `output_tokens`, `total_tokens` | `BIGINT` | ja | Nicht negative Tokenwerte, nicht geschätzt |
 | `tool_calls_count`, `tool_duration_ms` | `BIGINT` | ja | Tool-Telemetrie, soweit verfügbar |
-| `outcome_code` | `VARCHAR(63)` | ja | Providerneutraler Endcode |
-| `error_class` | `VARCHAR(16)` | ja | Stabile Fehlerklasse |
+| `error_class` | `VARCHAR(16)` | ja | Stabile, redigierte Fehlerklasse |
 | `error_code` | `VARCHAR(128)` | ja | Maschinenlesbarer, redigierter Code |
-| `error_detail_redacted` | `TEXT` | ja | Optionale redigierte Diagnose, nie Secret/Rohantwort |
-| `extra_metrics_json` | `TEXT` | ja | Erweiterbare optionale Metriken |
+| `error_detail_redacted` | `TEXT` | ja | Begrenzte, redigierte Diagnose |
+| `extra_metrics_json` | `TEXT` | ja | Begrenzte optionale Zusatzmetriken |
 | `version` | `INTEGER` | nein | Optimistic-Locking-Version |
 
-Vorgeschlagene Attempt-Statuswerte sind `CREATED`, `DISPATCHING`, `RUNNING`,
-`WAITING`, `SUCCEEDED`, `FAILED`, `TIMED_OUT`, `INTERRUPTED`. Diese Werte sind
-nicht vollständig durch v3.4 vorgegeben und benötigen Review.
+Das vorgeschlagene Minimalmodell lautet:
 
-Fehlerklassen entsprechen REC-04: `CONFIG`, `WAKE`, `READINESS`, `LLM`,
-`AGENT`, `TOOL`, `TIMEOUT`; eine generische `INTERNAL`-Klasse wird als offene
-Ergänzung vorgeschlagen.
+- `PENDING`: Attempt ist atomar mit dem Claim angelegt, Ausführung noch nicht
+  bestätigt.
+- `RUNNING`: konkrete Ausführung ist bestätigt aktiv.
+- `SUSPENDED`: externe Wartephase ist explizit sicher fortsetzbar; der
+  Wiederaufnahmepunkt ist persistiert und die Worker-Lease darf freigegeben
+  sein.
+- `SUCCEEDED`, `FAILED`, `INTERRUPTED`: terminale Ergebnisse. Ein Timeout wird
+  als `FAILED` mit Fehlerklasse `TIMEOUT` dargestellt und benötigt keinen
+  zusätzlichen Status.
 
-Constraints und Indizes:
+`WAITING` bleibt ausschließlich ein Jobstatus. Für `WAITING/LOCAL` ist kein
+offener Attempt erforderlich. Ein noch nicht als sicher fortsetzbar bestätigtes
+`WAITING/EXTERNAL` behält den Attempt `RUNNING` und seine Lease; erst die
+atomare Bestätigung erlaubt `SUSPENDED` und Lease-Freigabe. `INTERRUPTED` ist
+terminal und blockiert daher keinen späteren Retry-Attempt.
 
-- FK `job_id` und `worker_id` mit `RESTRICT`.
+Verbindliche Constraints und Indizes:
+
+- FKs `job_id` und `worker_id` mit `RESTRICT`.
 - Unique `(job_id, attempt_number)`.
-- Partieller Unique-Index für höchstens einen nicht terminalen Attempt pro Job.
-- Partieller Unique-Index `(worker_id, execution_ref)`, wenn eine Referenz
-  vorhanden ist.
-- Indizes `(status, updated_at)`, `(worker_id, status)` und `(job_id, created_at)`.
-- `CHECK(attempt_number >= 1)`, nicht negative Metriken und logisch geordnete
-  Zeitpunkte, soweit beide Werte vorhanden sind.
+- Partieller Unique-Index auf `job_id` für höchstens einen offenen Attempt mit
+  `status IN ('PENDING', 'RUNNING', 'SUSPENDED')`.
+- Partieller Unique-Index `(worker_id, execution_ref)`, wenn `execution_ref`
+  gesetzt ist.
+- Für offene Zustände ist `finished_at` `NULL`; für terminale Zustände ist es
+  gesetzt. `attempt_number` und `version` sind mindestens 1, Messwerte sind
+  nicht negativ und Zeitpunkte logisch geordnet, soweit jeweils vorhanden.
+- Indizes auf `(status, updated_at)`, `(worker_id, status)` und
+  `(job_id, created_at)`.
+
+Ob eine Wiederaufnahme `SUSPENDED -> RUNNING` im selben Attempt erfolgt oder
+eine neue konkrete Ausführung und damit einen neuen Attempt benötigt, hängt vom
+späteren Runtime-Vertrag ab. Vor Anlage eines neuen Attempts muss der bisherige
+`SUSPENDED`-Attempt terminalisiert werden. Der partielle Index ist mit beiden
+Varianten vereinbar; die exakten Transition Guards folgen nicht in A.2.
+
+Fehlerklassen umfassen mindestens die in REC-04 genannten Werte `CONFIG`,
+`WAKE`, `READINESS`, `LLM`, `AGENT`, `TOOL`, `TIMEOUT`. Ob zusätzlich eine
+generische, sicher redigierte `INTERNAL`-Klasse benötigt wird, bleibt vor der
+Implementierung zu entscheiden.
 
 ### 5.6 Tabelle `job_events`
 
-**Zweck:** Append-only Audit- und Zustandsverlauf für Diagnose, Force Sleep und
-Recovery, ohne frühere Attempts oder Fehlermessungen zu überschreiben.
+**Zweck:** Append-only Zustands- und Auditverlauf für Diagnose, Force Sleep und
+Recovery, ohne Attempt-Daten zu überschreiben.
 
-| Spalte | SQL-Typ | Bedeutung |
-| --- | --- | --- |
-| `event_id` | `INTEGER` | Autoincrement-PK, nur lokale Reihenfolge |
-| `job_id` | `VARCHAR(36)` | FK auf Job |
-| `attempt_id` | `VARCHAR(36)` | Optionaler FK auf Attempt |
-| `event_type` | `VARCHAR(63)` | Stabiler technischer Ereignistyp |
-| `from_status`, `to_status` | `VARCHAR(16)` | Optionale Zustandsänderung |
-| `error_class`, `error_code` | `VARCHAR` | Optionale redigierte Klassifikation |
-| `metadata_json` | `TEXT` | Redigierte Zusatzdaten ohne Secrets |
-| `occurred_at` | `BIGINT` | UTC-Zeitpunkt |
+| Spalte | SQL-Typ | Null | Bedeutung |
+| --- | --- | --- | --- |
+| `event_id` | `INTEGER` | nein | Autoincrement-PK, nur lokale Reihenfolge |
+| `job_id` | `VARCHAR(36)` | nein | FK auf Job |
+| `attempt_id` | `VARCHAR(36)` | ja | Optionaler FK auf Attempt |
+| `event_type` | `VARCHAR(63)` | nein | Validierter technischer Ereignistyp |
+| `from_status`, `to_status` | `VARCHAR(16)` | ja | Optionale Job-Zustandsänderung |
+| `error_class` | `VARCHAR(16)` | ja | Optionale redigierte Fehlerklasse |
+| `error_code` | `VARCHAR(128)` | ja | Optionaler sicherer Fehlercode |
+| `metadata_json` | `TEXT` | ja | Begrenzte, allowlist-validierte Metadaten |
+| `occurred_at` | `BIGINT` | nein | UTC-Zeitpunkt |
 
-Indizes liegen auf `(job_id, occurred_at, event_id)` und `attempt_id`. Die
-Retention ist noch festzulegen; Ereignisse ersetzen keine strukturierten Logs.
+FKs verwenden `RESTRICT`. `from_status` und `to_status` akzeptieren nur die
+verbindlichen Jobstatuswerte und sind entweder gemeinsam gesetzt oder gemeinsam
+`NULL`. Indizes liegen auf
+`(job_id, occurred_at, event_id)`, `attempt_id` und
+`(event_type, occurred_at)`. Append-only ist ein Repository-Vertrag; es werden
+keine Update-/Delete-Trigger eingeführt. Ein kontrollierter Retention-Use-Case
+darf Events zusammen mit dem Job löschen.
 
 ### 5.7 Tabelle `leases`
 
@@ -319,221 +381,265 @@ Retention ist noch festzulegen; Ereignisse ersetzen keine strukturierten Logs.
 | `lease_id` | `VARCHAR(36)` | nein | Primärschlüssel |
 | `worker_id` | `VARCHAR(63)` | nein | FK auf `worker_states` |
 | `owner` | `VARCHAR(128)` | nein | Technischer Owner, keine Zugangsdaten |
-| `purpose` | `VARCHAR(63)` | nein | Nutzung wie Inference, Agent, Job, Build, Test oder Development |
+| `purpose` | `VARCHAR(63)` | nein | Validierter generischer Nutzungszweck |
 | `job_id`, `attempt_id` | `VARCHAR(36)` | ja | Optionale Korrelation |
 | `created_at`, `last_heartbeat_at`, `expires_at` | `BIGINT` | nein | UTC-Zeitpunkte für TTL/Heartbeat |
 | `released_at` | `BIGINT` | ja | Explizite Freigabe |
 | `release_reason` | `VARCHAR(63)` | ja | Redigierter technischer Grund |
 
 Eine Lease ist genau dann aktiv, wenn `released_at IS NULL` und
-`expires_at > now_utc`. Es gibt bewusst weder Statusspalte noch
-`active_lease_count`. Abgelaufene, noch nicht bereinigte Zeilen sind bereits
-inaktiv.
+`expires_at > now_utc`. Es gibt weder Statusspalte noch `active_lease_count`;
+abgelaufene, noch nicht bereinigte Zeilen sind bereits inaktiv.
 
-Constraints und Indizes:
+Verbindliche Constraints und Indizes:
 
 - FKs auf Worker sowie optional Job/Attempt mit `RESTRICT`.
-- `CHECK(expires_at > created_at)`, Heartbeat nicht vor Erstellung und Release
-  nicht vor Erstellung.
-- Index `(worker_id, released_at, expires_at)` für den Sleep-Gate-Check.
+- `CHECK(expires_at > created_at)`,
+  `created_at <= last_heartbeat_at <= expires_at` und Release nicht vor
+  Erstellung.
+- Index `(worker_id, released_at, expires_at)` für Sleep-Gate-Abfragen.
 - Indizes auf `(owner, expires_at)`, `job_id` und `attempt_id`.
 
-Acquire, Heartbeat, Release und Expiry-Cleanup sind jeweils eigene kurze
-Transaktionen. Bei `WAITING/EXTERNAL` dürfen Bestätigung,
-`continuation_ref`-Persistierung und Lease-Freigabe nur in derselben fachlichen
-Transaktion erfolgen.
+Acquire, Heartbeat, Release und Expiry-Cleanup sind jeweils kurze
+Transaktionen. Bei `WAITING/EXTERNAL` müssen Resumability-Bestätigung,
+`continuation_ref`, `SUSPENDED`-Status und Lease-Freigabe in einer fachlichen
+Transaktion gespeichert werden. Die konkrete Lease-/Sleep-Logik folgt später.
 
-### 5.8 Tabellen `worker_states` und `service_states`
+### 5.8 Tabelle `worker_states`
 
-`worker_states` speichert ausschließlich beobachteten Betriebszustand, keine
-Verbindungs- oder Hardwaredaten:
+**Zweck:** Zuletzt persistierter, beobachteter Betriebszustand generischer
+Worker; keine Verbindungs-, Hardware- oder Servicekonfiguration.
 
-| Spalte | SQL-Typ | Bedeutung |
-| --- | --- | --- |
-| `worker_id` | `VARCHAR(63)` | PK, generische ID aus der Konfiguration |
-| `state` | `VARCHAR(16)` | `UNKNOWN`, `WAKING`, `READY`, `BUSY`, `IDLE`, `SLEEPING`, `UNAVAILABLE` |
-| `observed_at`, `state_changed_at`, `updated_at` | `BIGINT` | UTC-Zeitpunkte |
-| `idle_since`, `last_ready_at` | `BIGINT` | Optionale abgeleitete Zeitpunkte |
-| `last_error_class`, `last_error_code` | `VARCHAR` | Redigierte letzte Beobachtung |
-| `version` | `INTEGER` | Optimistic-Locking-Version |
+| Spalte | SQL-Typ | Null | Bedeutung |
+| --- | --- | --- | --- |
+| `worker_id` | `VARCHAR(63)` | nein | PK, generische ID aus der Runtime-Konfiguration |
+| `state` | `VARCHAR(16)` | nein | Verbindlicher Worker-Zustand |
+| `observed_at` | `BIGINT` | ja | Zeitpunkt der letzten realen Beobachtung |
+| `state_changed_at`, `updated_at` | `BIGINT` | nein | UTC-Zeitpunkte |
+| `idle_since`, `last_ready_at` | `BIGINT` | ja | Persistierte Zeitpunkte für Idle-/Recovery-Entscheidungen |
+| `last_error_class` | `VARCHAR(16)` | ja | Redigierte letzte Fehlerklasse |
+| `last_error_code` | `VARCHAR(128)` | ja | Redigierter letzter Fehlercode |
+| `version` | `INTEGER` | nein | Optimistic-Locking-Version |
 
-Indizes: `(state, updated_at)` und `idle_since`. Nach jedem Prozessstart wird
-der aktuelle Zustand vor weiteren Entscheidungen auf `UNKNOWN` gesetzt; ein
-alter `READY`-Wert gilt niemals als aktuelle Readiness. `BUSY` ist nur ein
-beobachteter Zustand und niemals ein Ersatz für die Lease-Abfrage.
-
-`service_states` bildet die servicebezogene Readiness ab:
-
-| Spalte | SQL-Typ | Bedeutung |
-| --- | --- | --- |
-| `worker_id`, `service_id` | `VARCHAR(63)` | Zusammengesetzter PK; Worker-FK |
-| `state` | `VARCHAR(16)` | Vorgeschlagen: `UNKNOWN`, `CHECKING`, `READY`, `NOT_READY`, `UNAVAILABLE` |
-| `observed_at`, `last_ready_at`, `updated_at` | `BIGINT` | UTC-Zeitpunkte |
-| `latency_ms` | `BIGINT` | Optionale Probe-Laufzeit |
-| `last_error_class`, `last_error_code` | `VARCHAR` | Redigierter Fehler |
-| `version` | `INTEGER` | Optimistic-Locking-Version |
-
-Der Service-Zustandsautomat ist eine offene Detailentscheidung. Persistierte
-Readiness muss nach Restart durch neue Probes bestätigt werden.
+Zulässig sind exakt `UNKNOWN`, `WAKING`, `READY`, `BUSY`, `IDLE`, `SLEEPING`
+und `UNAVAILABLE`. Indizes liegen auf `(state, updated_at)` und `idle_since`.
+Bei jedem Prozessstart werden konfigurierte Worker vor weiteren Entscheidungen
+auf `UNKNOWN` gesetzt beziehungsweise so angelegt; ein alter `READY`-Wert gilt
+niemals als aktuelle Readiness. Historische Worker-Zeilen bleiben wegen ihrer
+Attempt-/Lease-Bezüge erhalten. `BUSY` ist eine Beobachtung und kein Ersatz für
+die Lease-Abfrage.
 
 ### 5.9 Tabelle `control_state`
 
-**Zweck:** Globaler, persistenter Steuerungs- und Recovery-Zustand der einen
+**Zweck:** Globaler persistenter Steuerungs- und Recovery-Zustand der einzelnen
 Control Plane.
 
-| Spalte | SQL-Typ | Bedeutung |
+| Spalte | SQL-Typ | Null | Bedeutung |
+| --- | --- | --- | --- |
+| `singleton_id` | `SMALLINT` | nein | PK mit `CHECK(singleton_id = 1)` |
+| `dispatch_mode` | `VARCHAR(24)` | nein | `ACTIVE`, `PAUSED_RECOVERY`, `PAUSED_ADMIN`, `PAUSED_POWER` |
+| `recovery_status` | `VARCHAR(16)` | nein | `CLEAN`, `REQUIRED`, `RUNNING`, `FAILED` |
+| `process_instance_id` | `VARCHAR(36)` | ja | Kennung des aktuellen Starts; vor dem ersten Start `NULL` |
+| `started_at` | `BIGINT` | ja | Startzeit der aktuellen Instanz; vor dem ersten Start `NULL` |
+| `updated_at` | `BIGINT` | nein | UTC-Zeitpunkt der letzten Änderung |
+| `last_clean_shutdown_at` | `BIGINT` | ja | Letzter sauberer Shutdown, soweit vorhanden |
+| `version` | `INTEGER` | nein | Optimistic-Locking-Version |
+
+Die Initialmigration legt genau eine Zeile mit `PAUSED_RECOVERY`, `REQUIRED`
+und noch keiner Prozessinstanz an. Ein Prozessstart setzt Instanz und
+Startzeit; nur erfolgreicher Abgleich darf auf `ACTIVE` wechseln.
+`PAUSED_POWER` bereitet die in v3.4 verlangte Dispatch-Pause bei Force Sleep
+vor, ohne eine Power-Operation vorwegzunehmen. Die Tabelle enthält keine
+Lease-, Job- oder Attempt-Zähler. Prozessinstanz und `started_at` sind entweder
+gemeinsam gesetzt oder gemeinsam `NULL`; `version` ist mindestens 1.
+
+### 5.10 Bewusst verschobene Erweiterungen
+
+| Tabelle | Frühester fachlicher Bedarf | Grund für die Verschiebung |
 | --- | --- | --- |
-| `singleton_id` | `SMALLINT` | PK mit `CHECK(singleton_id = 1)` |
-| `dispatch_mode` | `VARCHAR(24)` | Vorgeschlagen: `ACTIVE`, `PAUSED_RECOVERY`, `PAUSED_SLEEP`, `PAUSED_ADMIN` |
-| `recovery_status` | `VARCHAR(16)` | Vorgeschlagen: `CLEAN`, `REQUIRED`, `RUNNING`, `FAILED` |
-| `process_instance_id` | `VARCHAR(36)` | Kennung des aktuellen Starts |
-| `started_at`, `updated_at` | `BIGINT` | UTC-Zeitpunkte |
-| `last_clean_shutdown_at` | `BIGINT` | Optionaler letzter sauberer Shutdown |
-| `version` | `INTEGER` | Optimistic-Locking-Version |
+| `job_dependencies` | Lokale Abhängigkeiten/Agent-Unterjobs | Abhängigkeitsarten, Zyklusregeln und Aufwecksemantik gehören zum späteren Jobmodell. |
+| `job_service_requirements` | Servicebezogener Dispatch | Die stabile Repräsentation benötigter Capabilities wird mit Job-API und Dispatcher festgelegt. |
+| `service_states` | Phase B Readiness | Zustände, Probe-Gültigkeit und Persistenzbedarf müssen mit der Readiness-Implementierung entschieden werden. |
+| `power_operations` | Phase C Power-Steuerung | Audit-, Grace- und Operationszustände hängen vom Manual-/Force-Sleep-Use-Case ab. |
+| `power_attempts` | Phase C Wake-/Sleep-Retry | Versuchszustände und Retry-Zuordnung werden mit dem Power-Adapter festgelegt. |
 
-Die Initialmigration legt genau eine Zeile an. Ein Prozessstart setzt Dispatch
-zunächst auf `PAUSED_RECOVERY`; nur erfolgreicher Abgleich darf auf `ACTIVE`
-wechseln. `control_state` enthält keine Lease- oder Job-Zähler.
+Die Verschiebung verwirft keine v3.4-Anforderung. Jede Tabelle wird vor ihrer
+Nutzung über eine eigene Alembic-Migration ergänzt. Die sechs Kerntabellen
+enthalten bereits stabile Job-/Attempt-Identitäten, Recovery-Referenzen,
+Worker-/Control-State, Leases und Events; sie erzwingen keine spekulative
+Semantik der späteren Komponenten.
 
-### 5.10 Tabellen `power_operations` und `power_attempts`
+### 5.11 Runtime-Konfiguration `schema_version: 2`
 
-**Zweck:** Persistente Wake-/Sleep-Steuerung, begrenzte Wake-Retries,
-Force-Sleep-Grace-Period und Auditierbarkeit.
+Der Datenbankpfad wird als neue, strikt validierte Sektion der externen
+Runtime-YAML geplant:
 
-`power_operations` enthält:
+```yaml
+schema_version: 2
+persistence:
+  database_path: /absolute/path/provided-by-deployment/oasix.sqlite3
+  busy_timeout_ms: 5000
+```
 
-| Spalte | SQL-Typ | Bedeutung |
-| --- | --- | --- |
-| `operation_id` | `VARCHAR(36)` | PK |
-| `worker_id` | `VARCHAR(63)` | FK auf Worker |
-| `trigger_job_id` | `VARCHAR(36)` | Optionaler auslösender Job |
-| `kind` | `VARCHAR(16)` | `WAKE`, `AUTO_SLEEP`, `MANUAL_SLEEP`, `FORCE_SLEEP` |
-| `status` | `VARCHAR(16)` | Vorgeschlagen: `PENDING`, `RUNNING`, `SUCCEEDED`, `FAILED`, `TIMED_OUT`, `CANCELLED` |
-| `requested_by`, `reason_redacted` | `TEXT` | Auditkontext ohne Zugangsdaten |
-| `requested_at`, `started_at`, `grace_deadline_at`, `finished_at` | `BIGINT` | UTC-Zeitpunkte |
-| `error_class`, `error_code` | `VARCHAR` | Redigierter Fehler |
-| `version` | `INTEGER` | Optimistic-Locking-Version |
+`database_path` ist ein absoluter lokaler Dateipfad, keine URL. Der Wert stammt
+ausschließlich aus der Runtime-Datei, wird nicht im Anwendungscode vorbelegt
+und enthält keine Zugangsdaten. `busy_timeout_ms` ist begrenzt positiv; sein
+endgültiger zulässiger Bereich wird vor Implementierung durch Concurrency-Tests
+festgelegt. WAL, Foreign Keys und `synchronous=FULL` sind geprüfte
+Persistenzinvarianten und keine frei abschaltbaren Konfigurationsschalter.
 
-Ein partieller Unique-Index begrenzt nicht terminale Power-Operationen auf eine
-pro Worker. Indizes liegen auf `(worker_id, status)` und `requested_at`.
+Behandlung alter Konfigurationen:
 
-`power_attempts` speichert jeden konkreten Wake-/Sleep-Versuch separat:
+- `schema_version: 1` behält unverändert seine heutige Bedeutung ohne
+  Persistenzsektion.
+- Ab der Persistenzimplementierung startet die vollständige Control Plane nur
+  mit Version 2. Version 1 wird mit einem sicheren, eindeutigen
+  Migrationshinweis abgewiesen; es gibt weder stillen Defaultpfad noch
+  automatische Umdeutung oder In-place-Migration der YAML-Datei.
+- Die manuelle Umstellung besteht aus dem expliziten Setzen von Version 2 und
+  dem Ergänzen der validierten `persistence`-Sektion. Bis A.2 implementiert ist,
+  bleibt der vorhandene Version-1-Code unverändert.
+- Bootstrap bleibt ausschließlich für `OASIX_CONFIG_FILE` und
+  `OASIX_SECRETS_DIRECTORY` zuständig. Es entsteht keine weitere
+  `OASIX_`-Umgebungsvariable und keine zweite Quelle für den DB-Pfad.
 
-| Spalte | SQL-Typ | Bedeutung |
-| --- | --- | --- |
-| `power_attempt_id` | `VARCHAR(36)` | PK |
-| `operation_id` | `VARCHAR(36)` | FK auf Power-Operation |
-| `attempt_number` | `INTEGER` | Bei 1 beginnende Sequenz |
-| `status` | `VARCHAR(16)` | `PENDING`, `RUNNING`, `SUCCEEDED`, `FAILED`, `TIMED_OUT`, `INTERRUPTED` |
-| `started_at`, `finished_at`, `duration_ms` | `BIGINT` | Zeitmessung |
-| `error_class`, `error_code` | `VARCHAR` | Redigierter Fehler |
+Dateisystem- und Berechtigungsvertrag:
 
-Unique `(operation_id, attempt_number)` verhindert Überschreiben früherer
-Versuche. Force Sleep setzt `control_state.dispatch_mode` und die Operation in
-einer Transaktion, bevor die Grace Period außerhalb der Transaktion abgewartet
-wird.
+- Der kanonisch aufgelöste Elternpfad muss existieren, lokal und persistent
+  sein; NFS, SMB und andere Netzwerkdateisysteme sind für WAL ausgeschlossen.
+- Das Ziel darf, wenn es existiert, nur eine reguläre Datei und kein Symlink
+  sein. Das dedizierte Verzeichnis darf nicht das Secret-Verzeichnis sein.
+- Der Control-Plane-Prozess benötigt ausschließlich dort Rechte für Datenbank,
+  `-wal` und `-shm`. Für Linux-Produktion sind ein dedizierter Owner,
+  Verzeichnismodus `0700`, Dateimodus `0600` und `umask 0077` vorgesehen.
+- Pfad, Typ, Schreibbarkeit, freie Anlage der Begleitdateien und soweit
+  zuverlässig erkennbar der lokale Dateisystemtyp werden vor Bereitstellung
+  der Runtime geprüft. Nicht sicher prüfbare Mount-Eigenschaften bleiben eine
+  dokumentierte Deployment-Voraussetzung und dürfen nicht als garantiert
+  dargestellt werden. Fehlerausgaben geben nicht den vollständigen
+  installationsspezifischen Pfad wieder.
 
-### 5.11 Engine, Sessions und SQLite-Pragmas
+Die exakte Pydantic-v2-Modellierung, sichere Dateiöffnung und Plattformtests
+sind Implementierungsgegenstand einer späteren Freigabe.
 
-Die geplante Factory akzeptiert einen validierten absoluten Datenbankpfad und
-erzeugt daraus intern die SQLite-URL. Beliebige URLs oder Zugangsdaten werden
-nicht übernommen. Der Pfad soll künftig als Control-Plane-Storage-Einstellung
-in der externen Runtime-Konfiguration stehen; ob dies `schema_version: 2`
-erfordert, ist vor Implementierung zu entscheiden.
+### 5.12 Idempotenzvertrag
 
-Die Datei muss auf einem lokalen persistenten Volume liegen. Das Verzeichnis
-muss das Erzeugen der SQLite-Datei sowie der `-wal`- und `-shm`-Dateien erlauben
-und restriktive Rechte besitzen. Die Datenbank darf weder im Secret-Verzeichnis
-noch auf NFS/SMB oder einem anderen Netzwerkdateisystem liegen.
+Die Empfehlung ist ein Scope pro stabiler, authentifizierter Caller-/Tenant-
+Identität. Der externe Rohschlüssel muss laut API-Vertrag aus mindestens 128 Bit
+Zufall erzeugt und in einem streng begrenzten Format übertragen werden. Die API
+kann Format und Länge, nicht aber tatsächliche Zufälligkeit eines Caller-Werts
+beweisen. Der Schlüssel wird weder persistiert noch geloggt; die
+Anwendung speichert seinen 32-Byte-SHA-256-Digest zusammen mit einem internen,
+nicht geheimen Scope. Diese Entropieanforderung verhindert praktikable
+Wörterbuchangriffe auf den nicht geheimen Digest und muss an der späteren API
+validiert werden.
+
+Der `request_fingerprint` ist ein SHA-256-Digest der kanonisierten semantischen
+Eingabe, mindestens aus Jobtyp, Rolle und validiertem Payload. Die exakte
+Kanonisierung wird vor Implementierung der Job-API spezifiziert und mit
+Testvektoren festgeschrieben.
+
+Trennung der Verantwortlichkeiten:
+
+- **Datenbank:** All-or-none-Constraint der drei Idempotenzfelder, Digestlängen
+  und partieller Unique-Index auf Scope plus Key-Digest.
+- **API/Geschäftslogik:** Scope nach erfolgreicher Authentifizierung ableiten,
+  Rohschlüssel/Fingerprint bilden und in einer Transaktion prüfen. Gleicher
+  Scope/Schlüssel und gleicher Fingerprint liefert den bestehenden Job;
+  abweichender Fingerprint ist ein Konflikt und erzeugt keinen neuen Job.
+- **Neustart:** Die persistierte Unique-Zuordnung gilt unverändert weiter und
+  benötigt keinen In-Memory-Cache.
+- **Datenschutz/Retention:** Rohschlüssel und Auth-Identität werden nicht
+  gespeichert. Die Idempotenzzuordnung lebt genau so lange wie ihre Jobzeile;
+  nach deren kontrollierter Löschung kann derselbe Schlüssel wieder verwendet
+  werden. Eine längere Replay-Sperre würde eine zusätzliche Tombstone-Tabelle
+  erfordern und ist nicht Bestandteil der ersten Migration.
+
+Die konkrete Retention-Dauer muss vor Freigabe der Job-API festgelegt werden;
+bis dahin darf keine automatische Löschung implementiert werden.
+
+### 5.13 Engine, Sessions und SQLite-Pragmas
+
+Die geplante Factory akzeptiert nur den bereits validierten Pfad und baut die
+SQLite-URL intern. Beliebige Datenbank-URLs werden nicht übernommen.
 
 Geplante Verbindungsinitialisierung:
 
-- Python-3.12-`sqlite3` mit nicht legacyhaftem Transaktionsmodus;
-- `PRAGMA foreign_keys=ON` auf jeder Verbindung und Verifikation des Ergebnisses;
-- persistentes `PRAGMA journal_mode=WAL` bei Initialisierung und Prüfung, dass
-  SQLite tatsächlich `wal` zurückliefert;
-- `PRAGMA busy_timeout=5000` als vorläufiger, später validierter Wert auf jeder
-  Verbindung;
+- Python-3.12-`sqlite3` mit explizitem, nicht legacyhaftem Transaktionsmodus;
+- `PRAGMA foreign_keys=ON` auf jeder Verbindung und Rückleseprüfung;
+- persistentes `PRAGMA journal_mode=WAL` bei Initialisierung und Prüfung auf
+  den tatsächlich zurückgegebenen Wert `wal`;
+- validiertes `PRAGMA busy_timeout` aus Runtime-Version 2 auf jeder Verbindung;
 - `PRAGMA synchronous=FULL` als sicherheitsorientierter MVP-Default;
-- kleiner begrenzter Connection Pool; konkrete Poolgröße bleibt bis zum
-  Lasttest offen.
+- kleiner, begrenzter Connection Pool; konkrete Größe nach Lasttest.
 
-Foreign-Key-Aktivierung und Python-3.12-Transaktionsmodus müssen anhand der
-[SQLAlchemy-SQLite-Hinweise](https://docs.sqlalchemy.org/en/20/dialects/sqlite.html)
-implementiert und getestet werden. Unbekannte oder nicht wirksame Pragmas
-dürfen nicht stillschweigend akzeptiert werden; kritische Werte werden nach dem
-Setzen zurückgelesen.
-
+Unbekannte oder nicht wirksame Pragmas werden nicht stillschweigend akzeptiert.
 Die Session Factory verwendet SQLAlchemy-2-Stil und `expire_on_commit=False`.
 Normale Use Cases verwenden `Session.begin()`; der Queue-Claim erhält eine
-kleine, separat getestete `BEGIN IMMEDIATE`-Primitive. Ein `SQLITE_BUSY` wird
-nur begrenzt und mit kurzem Backoff erneut versucht und anschließend als
-operativer Persistenzfehler gemeldet. DB-Lock-Retries sind nicht identisch mit
-der fachlichen Job-Retry-Policy.
+separat getestete `BEGIN IMMEDIATE`-Primitive. `SQLITE_BUSY` wird nur begrenzt
+mit kurzem Backoff erneut versucht und dann als operativer Persistenzfehler
+gemeldet. DB-Lock-Retry und fachlicher Job-Retry sind getrennt.
 
-### 5.12 Transaktionsgrenzen
+### 5.14 Transaktionsgrenzen
 
 Folgende Änderungen sind jeweils atomar geplant:
 
-- **Job anlegen:** Job, Service-Anforderungen, Abhängigkeiten und initiales
-  Event.
+- **Job anlegen:** Job und initiales Event; Idempotenzkonflikt wird innerhalb
+  derselben Transaktion entschieden.
 - **Job claimen:** Status-/Versionswechsel, neuer Attempt und Claim-Event.
 - **Attempt abschließen:** Attempt-Endstatus/Telemetrie, Job-Endstatus oder
   `RETRY_WAIT`, `next_eligible_at` und Event.
 - **Lease:** Acquire, einzelner Heartbeat sowie Release/Expiry-Cleanup jeweils
   als kurze Transaktion.
-- **Sleep Gate:** Dispatch pausieren und innerhalb derselben Transaktion erneut
-  aktive Leases, fällige Jobs, Idle-Zeit und Worker-State prüfen. Erst danach
-  erfolgt der externe Sleep-Aufruf.
-- **Force Sleep:** Dispatch-Pause und Power-Operation atomar persistieren;
-  spätere Interrupt-Markierungen werden nach der Grace Period in einer neuen
-  Transaktion geschrieben.
+- **Externes Warten:** Resumability-Bestätigung, `continuation_ref`,
+  `SUSPENDED`, Jobstatus und Lease-Freigabe.
+- **Sleep Gate:** Dispatch pausieren und in derselben Transaktion erneut aktive
+  Leases, fällige Jobs, Idle-Zeit und Worker-State prüfen. Erst danach erfolgt
+  ein externer Sleep-Aufruf.
 - **Recovery-Start:** `PAUSED_RECOVERY`, Prozessinstanz und Worker `UNKNOWN`
-  atomar setzen, bevor reale Probes beginnen.
+  setzen, bevor reale Probes beginnen.
 
-Lange Wartezeiten, Polling und externe Kommunikation dürfen keine
-DB-Transaktion offenhalten.
+Abhängigkeiten, Service-Anforderungen und Power-Operationen werden erst nach
+Einführung ihrer verschobenen Tabellen Teil entsprechender Transaktionen.
+Lange Wartezeiten, Polling und externe Kommunikation halten keine
+DB-Transaktion offen.
 
-### 5.13 Alembic und Upgrade-Strategie
+### 5.15 Alembic und Upgrade-Strategie
 
-Die geplante Initialmigration erstellt alle Tabellen, benannten Constraints,
-Indizes, die `control_state`-Singleton-Zeile und Alembics eigene
-`alembic_version`. Das Produktionsschema wird nicht über
-`Base.metadata.create_all()` erzeugt.
+Die Initialmigration erstellt die sechs fachlichen Tabellen, benannten
+Constraints, Indizes und die `control_state`-Singleton-Zeile. Das
+Produktionsschema wird nicht über `Base.metadata.create_all()` erzeugt.
 
 - Es gibt zunächst genau einen linearen Alembic-Head.
-- Autogenerate ist nur ein Entwurfswerkzeug; jede Migration wird manuell auf
+- Autogenerate ist nur Entwurfswerkzeug; jede Migration wird manuell auf
   Constraints, Indizes, Datenmigration und Downtime geprüft.
-- `render_as_batch=True` und benannte Constraints bereiten SQLite-
-  Tabellenumbauten vor. Die
-  [Alembic-Batch-Dokumentation](https://alembic.sqlalchemy.org/en/latest/batch.html)
-  weist auf „move and copy“ und Foreign-Key-Besonderheiten hin.
-- Muss eine Batch-Migration die Foreign-Key-Prüfung vorübergehend deaktivieren,
-  geschieht dies ausschließlich auf der exklusiven Migrationsverbindung. Die
-  Prüfung wird noch vor Freigabe der Datenbank reaktiviert und durch
-  `foreign_key_check` verifiziert.
-- Migrationen laufen vor dem Start von API, Dispatcher und Recovery exklusiv.
-  Mehrere Prozesse dürfen nicht gleichzeitig migrieren.
-- Vor destruktiven oder Tabellen kopierenden Migrationen wird ein geprüftes
-  Backup erstellt. Danach folgen `foreign_key_check`, `integrity_check` und ein
-  Schema-Smoke-Test.
-- Die Anwendung schlägt geschlossen fehl, wenn DB-Revision und erwarteter
-  Alembic-Head nicht übereinstimmen.
-- Downgrades werden in Entwicklung getestet, sind aber keine garantierte
-  Produktionsrollback-Strategie. Produktion rollt bei nicht sicher reversiblen
-  Änderungen auf Anwendungsversion plus Backup zurück.
+- `render_as_batch=True` und benannte Constraints bereiten SQLite-Umbauten vor.
+  Maßgeblich ist die
+  [Alembic-Batch-Dokumentation](https://alembic.sqlalchemy.org/en/latest/batch.html).
+- Eine vorübergehende Deaktivierung der Foreign-Key-Prüfung ist nur auf der
+  exklusiven Migrationsverbindung zulässig. Vor Freigabe werden Foreign Keys
+  reaktiviert und mit `foreign_key_check` geprüft.
+- Migrationen laufen vor API, Dispatcher und Recovery exklusiv. Vor
+  destruktiven beziehungsweise tabellenkopierenden Migrationen wird ein
+  getestetes Backup erstellt; danach folgen `foreign_key_check`,
+  `integrity_check` und Schema-Smoke-Test.
+- Die Anwendung schlägt geschlossen fehl, wenn DB-Revision und erwarteter Head
+  nicht übereinstimmen.
+- Downgrades werden entwickelt und getestet, sind aber keine garantierte
+  Produktionsrollback-Strategie. Nicht sicher reversible Änderungen erfordern
+  Restore von Anwendungsversion und Backup.
 
-### 5.14 Verhalten nach Prozessneustart
+### 5.16 Verhalten nach Prozessneustart
 
 Der spätere Startup-/Recovery-Ablauf ist geplant als:
 
-1. Runtime-Konfiguration und Secrets vollständig validieren.
-2. Datenbank öffnen, Pragmas prüfen und Alembic-Revision validieren.
-3. Dispatch als `PAUSED_RECOVERY` markieren, neue Prozessinstanz persistieren
-   und Worker-/Service-State auf `UNKNOWN` setzen.
+1. Runtime-Konfiguration Version 2 und Secrets vollständig validieren.
+2. DB-Pfad prüfen, Datenbank öffnen, Pragmas und Alembic-Revision validieren.
+3. Dispatch `PAUSED_RECOVERY` setzen, Prozessinstanz persistieren und Worker auf
+   `UNKNOWN` setzen.
 4. Abgelaufene Leases bei Aktivitätsabfragen sofort ignorieren und später
-   kontrolliert als abgelaufen bereinigen.
-5. Nicht terminale Jobs, Attempts und Power-Operationen laden.
+   kontrolliert bereinigen.
+5. Nicht terminale Jobs und Attempts laden.
 6. Worker und erforderliche Services real prüfen; `execution_ref` verwenden,
    um laufende Ausführung zweifelsfrei zu bestätigen.
 7. Nicht bestätigbare Attempts in einer später implementierten Recovery-
@@ -541,60 +647,73 @@ Der spätere Startup-/Recovery-Ablauf ist geplant als:
    auf `RETRY_WAIT`, `BLOCKED` oder `FAILED` überführen.
 8. Dispatch erst nach erfolgreichem Abgleich aktivieren.
 
-Dieses Dokument definiert nur die persistierbaren Voraussetzungen. Probe-,
-Klassifikations- und Recovery-Geschäftslogik wird nicht in diesem Designschritt
-implementiert.
+Service-State und Power-Operationen werden nach Einführung ihrer Tabellen in
+den Ablauf aufgenommen. Dieses Dokument implementiert keine Probe-, Retry- oder
+Recovery-Geschäftslogik.
 
-### 5.15 Backup und Restore unter WAL
+### 5.17 Retention, Backup und Restore
+
+**Retention-Vertrag:** Aktive beziehungsweise nicht terminale Jobs, offene
+Attempts und aktive Leases werden niemals durch zeitbasierte Retention gelöscht.
+Terminale Jobs werden später nur in einer expliziten Transaktion zusammen mit
+Attempts und Events gelöscht. Idempotenz endet dabei mit der Jobzeile.
+Abgelaufene/freigegebene Leases erhalten einen getrennten Cleanup-Zeitraum;
+`worker_states` mit Referenzen und die `control_state`-Zeile bleiben erhalten.
+Die numerischen Aufbewahrungsfristen sind mangels Betriebs-/Auditvorgabe in
+v3.4 offen und müssen vor jeder automatischen Löschfunktion entschieden und
+extern konfigurierbar gemacht werden.
 
 Eine laufende WAL-Datenbank darf nicht durch Kopieren nur der Hauptdatei
-gesichert werden: Die WAL-Datei ist Teil des persistenten Zustands. Bevorzugt
-wird ein konsistenter Online-Snapshot über Pythons Zugriff auf die
-[SQLite Backup API](https://www.sqlite.org/backup.html). `VACUUM INTO` ist eine
-zweite, stärker I/O-/CPU-lastige Option für einen kompakten konsistenten
-Snapshot.
+gesichert werden. Bevorzugt ist ein konsistenter Online-Snapshot über die
+[SQLite Backup API](https://www.sqlite.org/backup.html); `VACUUM INTO` ist eine
+I/O-intensivere Alternative.
 
 Backup-Ablauf:
 
-1. Ziel auf ein getrenntes, zugriffsgeschütztes Volume schreiben.
+1. Snapshot auf ein getrenntes, zugriffsgeschütztes Ziel schreiben.
 2. SQLite Backup API mit Busy-Handling verwenden; keine rohe Live-Dateikopie.
-3. Ziel schließen, Prüfsumme und Dateirechte setzen.
+3. Ziel schließen, Prüfsumme und restriktive Dateirechte setzen.
 4. Backup mit `integrity_check`, `foreign_key_check` und erwarteter
    `alembic_version` validieren.
-5. Backup erst danach als erfolgreich markieren und gemäß noch festzulegender
-   Retention rotieren.
+5. Backup verschlüsselt beziehungsweise durch gleichwertige Storage-
+   Verschlüsselung geschützt ablegen und erst danach als erfolgreich markieren.
 
-Alternativ ist bei gestoppter Control Plane eine kontrollierte Checkpoint-/
-Close-Sequenz mit anschließender Dateikopie zulässig. Restore erfolgt nur bei
-gestoppter Anwendung in ein leeres Datenverzeichnis, danach folgen
-Integritäts-/Revisionsprüfung und der normale Recovery-Start. RPO, RTO,
-Backup-Verschlüsselung, Offsite-Ablage und Retention sind offene Betriebsfragen.
+Bei gestoppter Control Plane ist eine kontrollierte Checkpoint-/Close-Sequenz
+mit anschließender Dateikopie zulässig. Restore erfolgt nur bei gestoppter
+Anwendung in ein leeres Datenverzeichnis, gefolgt von Integritäts-, Revisions-
+und normaler Recovery-Prüfung. Schlüssel für Backup-Verschlüsselung dürfen
+nicht neben dem Backup liegen. Konkrete RPO/RTO, Verschlüsselungstechnik,
+Offsite-Ablage und numerische Backup-Retention bleiben offene Betriebsfragen.
 
 ## 6. Tests und Nachweise
 
-In diesem Designschritt wurden keine Persistenztests implementiert und keine
-SQLite-Datei erzeugt. Die bestehende A.1-Suite bleibt der einzige aktuelle
-Anwendungsnachweis.
+In diesem Designschritt werden keine Persistenztests implementiert und keine
+SQLite-Datei erzeugt. Für die spätere Implementierung ist mindestens folgende
+Testmatrix vorgesehen:
 
-Für die spätere Implementierung ist mindestens folgende Testmatrix vorgesehen:
-
-- frische Initialmigration und Upgrade von jeder unterstützten Revision,
-- benannte Constraints, Foreign-Key-Enforcement und ungültige Statuswerte,
+- Runtime-Version 1 wird sicher und eindeutig abgewiesen; Version 2 und
+  ungültige Pfade/Berechtigungen werden getestet,
+- frische Initialmigration mit genau sechs Fachtabellen und Upgrade von jeder
+  unterstützten Revision,
+- benannte Constraints, Foreign-Key-Enforcement, JSON-Validierung, Byte-Limits
+  und ungültige Statuswerte,
+- Idempotenz: gleicher Scope/Key/Payload, Konfliktpayload, Scope-Trennung,
+  Parallelzugriff und Neustart,
 - WAL-/Busy-Timeout-/Transaktionskonfiguration je Verbindung,
-- atomarer Job-Claim bei konkurrierenden Sessions ohne doppelten Attempt,
+- atomarer Job-Claim bei getrennten Sessions ohne doppelten Attempt,
 - Retry erzeugt eine neue Attempt-Zeile und erhält frühere Telemetrie,
-- Crash/Rollback an jeder Transaktionsgrenze ohne Teilzustand,
+- `WAITING/EXTERNAL`, `SUSPENDED`, atomare Continuation-/Lease-Regel und
+  Wiederaufnahme ohne Verletzung des partiellen Unique-Index,
 - Lease Acquire/Heartbeat/Release/Expiry und Sleep Gate ohne Aktivitätszähler,
-- `WAITING/EXTERNAL` mit atomarer Resumability-/Continuation-/Lease-Regel,
 - Restart mit `UNKNOWN`, pausiertem Dispatch und nicht bestätigtem Attempt,
-- Force-Sleep-Grace-Period und `INTERRUPTED`-Markierung,
+- Schutztests mit Sentinel-Secrets in allen begrenzten Nutzdatenfeldern,
 - Backup einer aktiven WAL-Datenbank und Restore in eine leere Umgebung,
-- migrationsbedingte SQLite-Batch-Umbauten mit Daten- und Constraint-Erhalt,
+- SQLite-Batch-Umbauten mit Daten- und Constraint-Erhalt,
 - Linux-CI ohne reale Infrastruktur oder produktive Daten.
 
-SQLite-Concurrency-Tests müssen echte getrennte Verbindungen und temporäre
-Dateidatenbanken verwenden; eine einzelne In-Memory-Verbindung belegt das
-Locking-Verhalten nicht.
+SQLite-Concurrency-Tests verwenden getrennte Verbindungen und temporäre
+Dateidatenbanken; eine einzelne In-Memory-Verbindung belegt das Lockingverhalten
+nicht.
 
 ## 7. Einschränkungen, Risiken und offene Architekturfragen
 
@@ -603,65 +722,72 @@ Locking-Verhalten nicht.
 - SQLite serialisiert Writer. Lange Transaktionen oder hohe Schreiblast können
   `SQLITE_BUSY` und Dispatch-Latenz verursachen.
 - Lange Reader können WAL-Checkpoints verzögern und die WAL-Datei wachsen
-  lassen; Monitoring und ein späterer Checkpoint-Betriebsplan sind nötig.
+  lassen; Monitoring und ein Checkpoint-Betriebsplan sind nötig.
 - WAL ist für Netzwerkdateisysteme ungeeignet und bietet keine eingebaute HA.
-- SQLite-Batch-Migrationen kopieren Tabellen und benötigen Speicherplatz sowie
-  ein exklusives Wartungsfenster.
+- SQLite-Batch-Migrationen kopieren Tabellen und benötigen Platz sowie ein
+  exklusives Wartungsfenster.
 - Lease-TTL basiert nach Neustart auf der UTC-Wanduhr. Zeitsynchronisation und
   Verhalten bei Uhrsprüngen sind betriebliche Voraussetzungen.
-- Job-Payload, `continuation_ref`, Fehlerdetails und Metriken können sensible
-  Nutzdaten enthalten. Redigierung, Größenlimits, Retention und gegebenenfalls
-  Verschlüsselung müssen vor Implementierung festgelegt werden.
+- Byte-Limits und Allowlist-Schemata reduzieren, verhindern aber nicht jede
+  Fehlklassifikation sensibler Nutzdaten. Zugriffsrechte, Logging-Disziplin,
+  Backupschutz und spätere Löschung bleiben notwendig.
+- Ein SHA-256-Digest schützt nur ausreichend zufällige Idempotenzschlüssel; die
+  spätere API kann den Erzeugungsvertrag nur durch Format- und Längenprüfung
+  flankieren.
 - Ein SQLAlchemy-Abstraktionslayer garantiert keine verlustfreie spätere
   Migration zu PostgreSQL.
 
 ### Vor Implementierung zu klären
 
 1. Welche UUID-Version wird für neue IDs verwendet?
-2. Ist `idempotency_key` global eindeutig oder nach Client/Owner/Jobtyp
-   gescoped?
-3. Welche Attempt-, Service-, Power- und Recovery-Statusübergänge sind exakt
-   zulässig, insbesondere für `WAITING`?
-4. Benötigt die MVP-Queue Prioritäten, Deadlines oder Fairnessregeln jenseits
+2. Welcher stabile interne Auth-/Tenant-Bezug liefert den
+   `idempotency_scope`, und wie wird der Request exakt kanonisiert?
+3. Erfolgt eine Runtime-Wiederaufnahme im selben `SUSPENDED`-Attempt oder als
+   neuer Attempt, und wie wird der alte Attempt im zweiten Fall terminalisiert?
+4. Wird zusätzlich zu REC-04 eine Fehlerklasse `INTERNAL` benötigt?
+5. Benötigt die MVP-Queue Prioritäten, Deadlines oder Fairnessregeln jenseits
    deterministischem FIFO nach Fälligkeit?
-5. Wird die Retry-Policy bei Joberstellung eingefroren oder gilt nach Neustart
-   die jeweils aktuelle Runtime-Konfiguration?
-6. Wie groß dürfen Job-Payload, Resultatreferenz, `continuation_ref`,
-   Fehlerdetails und `extra_metrics` werden, und wie lange werden sie gehalten?
-7. Wird der Datenbankpfad in einer neuen Runtime-`schema_version` eingeführt,
-   und welche Pfad-/Berechtigungsprüfungen sind verbindlich?
-8. Welche Busy-Timeout-, Pool- und DB-Lock-Retry-Werte bestehen den realen
+6. Wird die Retry-Policy bei Joberstellung eingefroren oder gilt nach Neustart
+   die aktuelle Runtime-Konfiguration?
+7. Welcher Wertebereich für `busy_timeout_ms` und welche Poolgröße bestehen den
    Lasttest?
-9. Welche Heartbeat-/TTL-Werte, Purpose-Bezeichner und Owner-Formate gelten für
+8. Welche Heartbeat-/TTL-Werte, Purpose-Bezeichner und Owner-Formate gelten für
    Leases?
-10. Welches Worker-Protokoll bestätigt eine `execution_ref` nach Restart
-    zweifelsfrei?
-11. Welche Retention gilt für Jobs, Events, Attempts, Leases und
-    Power-Operationen, ohne Recovery/Audit zu beschädigen?
+9. Welches Worker-Protokoll bestätigt eine `execution_ref` nach Restart
+   zweifelsfrei?
+10. Welche numerischen Retention-Fristen gelten für Jobs, Events, Attempts und
+    Leases, und ist eine längere Idempotenz-Tombstone-Frist erforderlich?
+11. Welcher externe Result Store liefert `result_ref`, und wie werden Zugriff,
+    Löschung und Referenzintegrität abgesichert?
 12. Welche verbindlichen RPO-/RTO-, Verschlüsselungs- und Offsite-Anforderungen
     gelten für Backup und Restore?
-13. Ab welcher gemessenen Last oder Betriebsanforderung wird PostgreSQL
+13. Wie wird der lokale Dateisystemtyp auf allen unterstützten
+    Produktionsplattformen zuverlässig geprüft beziehungsweise betrieblich
+    attestiert?
+14. Ab welcher gemessenen Last oder Betriebsanforderung wird PostgreSQL
     verpflichtend?
 
-Diese Punkte sind keine stillschweigenden Implementierungsannahmen. Sie werden
-im Review entschieden oder ausdrücklich in die jeweilige spätere Phase
-verschoben.
+Diese Punkte sind keine stillschweigenden Annahmen. Sie werden vor dem jeweils
+betroffenen Implementierungsschritt entschieden. Die fünf verschobenen Tabellen
+erhalten erst dann ihr endgültiges Schema, wenn ihre fachlichen Verträge
+feststehen.
 
 ## 8. Abnahmestatus
 
-Der Designentwurf ist vollständig dokumentiert, aber **nicht zur Implementierung
-freigegeben**. A.2 bleibt „Design in Arbeit“, bis Schema, Statusautomaten,
-Konfigurationsort, Retention und Backup-Anforderungen reviewt wurden.
+Der konsolidierte Entwurf ist dokumentiert, aber **nicht zur Implementierung
+freigegeben**. A.2 bleibt „Design in Arbeit“, bis die nächste Review-Freigabe
+erfolgt und die unmittelbar implementierungsrelevanten offenen Punkte entschieden
+sind.
 
 Es gibt keine Aussage über funktionierende Persistenz, Migrationen, Recovery
-oder Produktionsreife. Nach Review ist eine separate Freigabe für Anwendungscode,
-Dependencies, Initialmigration und Tests erforderlich.
+oder Produktionsreife. Anwendungscode, Dependencies, Tests, Initialmigration
+und Datenbankdateien folgen ausschließlich nach separater Freigabe.
 
 ## 9. GitHub-Referenzen
 
-- Commits: für diesen Designschritt noch keine
-- Pull Requests: für diesen Designschritt noch keine
-- CI-Läufe: für diesen Designschritt noch keine
+- Commits: für diesen Design-Review noch keine
+- Pull Requests: für diesen Design-Review noch keine
+- CI-Läufe: für diesen Design-Review noch keine
 
-Die Referenzen werden erst nach einem tatsächlichen Commit beziehungsweise Pull
-Request ergänzt; es werden keine zukünftigen Links vorweggenommen.
+Referenzen werden erst nach tatsächlichem Commit beziehungsweise Pull Request
+ergänzt; zukünftige Links werden nicht vorweggenommen.
