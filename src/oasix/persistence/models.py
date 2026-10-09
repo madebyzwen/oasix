@@ -18,6 +18,8 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
+from oasix.worker.contracts import WorkerLifecycleState
+
 JOB_STATUSES = (
     "QUEUED",
     "RUNNING",
@@ -36,15 +38,7 @@ ATTEMPT_STATUSES = (
     "FAILED",
     "INTERRUPTED",
 )
-WORKER_STATES = (
-    "UNKNOWN",
-    "WAKING",
-    "READY",
-    "BUSY",
-    "IDLE",
-    "SLEEPING",
-    "UNAVAILABLE",
-)
+WORKER_STATES = tuple(state.value for state in WorkerLifecycleState)
 DISPATCH_MODES = ("ACTIVE", "PAUSED_RECOVERY", "PAUSED_ADMIN", "PAUSED_POWER")
 RECOVERY_STATUSES = ("CLEAN", "REQUIRED", "RUNNING", "FAILED")
 
