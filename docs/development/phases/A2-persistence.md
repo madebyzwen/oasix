@@ -1,6 +1,6 @@
 # Phase A.2 – Datenbankdesign und Architekturplanung
 
-Status: **Design in Arbeit – nicht implementiert**
+Status: **Design abgeschlossen – nicht implementiert**
 
 ## 1. Ziel und Abgrenzung
 
@@ -8,7 +8,8 @@ Phase A.2 plant eine lokale, transaktionale und migrationsfähige Persistenz fü
 die OASIX-Control-Plane. Der vorgesehene Stack besteht aus Python 3.12, SQLite
 im WAL-Modus, SQLAlchemy 2, Alembic und pytest.
 
-Dieses Dokument ist ein konsolidierter Review-Entwurf. Es wurden weder
+Dieses Dokument ist der finalisierte Entwurf nach abgeschlossenem
+Architektur-Review. Es wurden weder
 Anwendungscode noch Dependencies, Datenbankdateien oder Alembic-Migrationen
 angelegt. Die erste Migration ist auf sechs fachliche Kerntabellen begrenzt.
 Queue-Dispatch, Retry, Recovery, Lease-Ablauf und Power-Steuerung werden hier
@@ -151,13 +152,14 @@ Geschäftskomponente entworfen und migriert:
 - `power_operations`
 - `power_attempts`
 
-## 5. Geplanter Designentwurf
+## 5. Finalisierter Designentwurf
 
 ### 5.1 Gemeinsame Datenkonventionen
 
-- Primär-IDs werden von der Anwendung als kanonische UUID-Strings erzeugt und
-  als `VARCHAR(36)` gespeichert. Die konkrete UUID-Version bleibt vor der
-  Implementierung festzulegen.
+- Primär-IDs werden von der Anwendung als UUIDv4 erzeugt, kanonisch in
+  Kleinschreibung mit Bindestrichen dargestellt und als `VARCHAR(36)`
+  gespeichert. UUIDv4 ist der einfache, plattformunabhängige A.2-Standard;
+  zeitlich sortierbare oder zentrale ID-Generatoren werden nicht eingeführt.
 - `worker_id`, Rollen und technische Arten verwenden validierte, generische
   Identifikatoren; keine Infrastrukturbezeichnung wird fest codiert.
 - Sämtliche Zeitpunkte werden als `BIGINT`/SQLite `INTEGER` in UTC-
@@ -185,6 +187,7 @@ Exceptions oder Logs aufnehmen.
 | --- | --- |
 | `input_payload_json` | Höchstens 1.048.576 UTF-8-Bytes; valides JSON-Objekt, zusätzlich gegen ein typspezifisches Schema mit verbotenen unbekannten Feldern validiert. Auth-Header, private Schlüssel, Passwörter und andere Zugangsdaten sind unzulässig. Größere Eingaben müssen später extern gespeichert und sicher referenziert werden. |
 | `result_ref` | Höchstens 2.048 UTF-8-Bytes; ausschließlich eine opake, nicht authentifizierende Referenz. Ergebnisinhalt und unkontrollierte Provider-Rohantworten werden nicht in `jobs` gespeichert. Credential-haltige URLs sind verboten. |
+| `attempts.execution_ref` | Höchstens 2.048 UTF-8-Bytes; ausschließlich eine opake, nicht authentifizierende Runtime-Referenz. Eingebettete Zugangsdaten, authentifizierende URLs und Tokens sind verboten. Der Wert darf weder in Logs noch in Fehlermeldungen erscheinen. Es gelten dieselben Schutzregeln wie für `result_ref`. |
 | `continuation_ref` | Höchstens 4.096 UTF-8-Bytes; opake, nicht authentifizierende Wiederaufnahmereferenz. Ist der Runtime-Zustand selbst geheim oder größer, muss er extern geschützt gespeichert werden; die DB enthält dann nur dessen Referenz. Das Feld wird nie geloggt. |
 | `error_detail_redacted` | Höchstens 8.192 UTF-8-Bytes; ausschließlich redigierte Diagnose. Keine Rohantwort, kein Stack-Dump, kein Request-Payload und keine Header. Fehlerklasse und sicherer Fehlercode bleiben separate Felder. |
 | `extra_metrics_json` | Höchstens 65.536 UTF-8-Bytes; valides JSON-Objekt mit höchstens acht Verschachtelungsebenen und validierten technischen Schlüsseln. Es ergänzt nur Metriken und darf keine Kernfelder, Nutzinhalte oder Secrets spiegeln. |
@@ -199,6 +202,13 @@ spiegelt die Migration alle genannten Byte-Obergrenzen zusätzlich in benannten
 `CHECK(length(CAST(feld AS BLOB)) <= limit)`-Constraints. Typspezifische
 JSON-Schemata, Verschachtelung und Inhaltsverbote bleiben
 Anwendungsverantwortung.
+
+Für `execution_ref` akzeptiert die Anwendung nur das ausdrücklich als
+nicht geheim deklarierte Referenzfeld eines Runtime-Adapters, keine URL und
+kein Authentifizierungsfeld. Liefert ein Backend ausschließlich ein Token oder
+eine credential-haltige URL, muss der Adapter daraus außerhalb dieser Tabelle
+eine sichere Referenz bilden oder den Wert ablehnen. Eine Mustererkennung
+vermeintlicher Tokens wird nicht als Sicherheitskontrolle verwendet.
 
 Die SQLite-Datei enthält damit weiterhin potenziell sensible Nutzdaten. Datei,
 WAL, SHM, Snapshots und Backups unterliegen denselben Zugriffsregeln. Ergebnisse
@@ -330,6 +340,10 @@ Verbindliche Constraints und Indizes:
   `status IN ('PENDING', 'RUNNING', 'SUSPENDED')`.
 - Partieller Unique-Index `(worker_id, execution_ref)`, wenn `execution_ref`
   gesetzt ist.
+- `execution_ref` wird vor dem Schreiben auf höchstens 2.048 UTF-8-Bytes und
+  das Verbot authentifizierender Inhalte validiert. Ein benannter
+  Byte-Längen-`CHECK` schützt zusätzlich vor zu großen direkten DB-Writes;
+  Fehler und Logs geben den Wert nicht wieder.
 - Für offene Zustände ist `finished_at` `NULL`; für terminale Zustände ist es
   gesetzt. `attempt_number` und `version` sind mindestens 1, Messwerte sind
   nicht negativ und Zeitpunkte logisch geordnet, soweit jeweils vorhanden.
@@ -483,9 +497,9 @@ persistence:
 
 `database_path` ist ein absoluter lokaler Dateipfad, keine URL. Der Wert stammt
 ausschließlich aus der Runtime-Datei, wird nicht im Anwendungscode vorbelegt
-und enthält keine Zugangsdaten. `busy_timeout_ms` ist begrenzt positiv; sein
-endgültiger zulässiger Bereich wird vor Implementierung durch Concurrency-Tests
-festgelegt. WAL, Foreign Keys und `synchronous=FULL` sind geprüfte
+und enthält keine Zugangsdaten. `busy_timeout_ms` ist positiv validiert und
+verwendet zunächst 5.000 ms als Default und Referenzwert. WAL, Foreign Keys und
+`synchronous=FULL` sind geprüfte
 Persistenzinvarianten und keine frei abschaltbaren Konfigurationsschalter.
 
 Behandlung alter Konfigurationen:
@@ -565,20 +579,37 @@ SQLite-URL intern. Beliebige Datenbank-URLs werden nicht übernommen.
 
 Geplante Verbindungsinitialisierung:
 
-- Python-3.12-`sqlite3` mit explizitem, nicht legacyhaftem Transaktionsmodus;
-- `PRAGMA foreign_keys=ON` auf jeder Verbindung und Rückleseprüfung;
+- Python-3.12-`sqlite3` mit `autocommit=False`, damit nicht der legacyhafte
+  Transaktionsmodus die Semantik bestimmt;
+- `PRAGMA foreign_keys=ON` über einen SQLAlchemy-Connect-Hook auf jeder
+  Verbindung. Der Hook setzt das Pragma gemäß SQLAlchemy-Empfehlung bei
+  vorübergehendem DBAPI-Autocommit und stellt den vorherigen Wert anschließend
+  wieder her; eine Rückleseprüfung muss `1` ergeben;
 - persistentes `PRAGMA journal_mode=WAL` bei Initialisierung und Prüfung auf
   den tatsächlich zurückgegebenen Wert `wal`;
-- validiertes `PRAGMA busy_timeout` aus Runtime-Version 2 auf jeder Verbindung;
+- `PRAGMA busy_timeout=5000` auf jeder Verbindung, sofern die validierte
+  Runtime-Konfiguration keinen ausdrücklich anderen positiven Wert vorgibt;
 - `PRAGMA synchronous=FULL` als sicherheitsorientierter MVP-Default;
-- kleiner, begrenzter Connection Pool; konkrete Größe nach Lasttest.
+- SQLAlchemy-`QueuePool` mit `pool_size=5`, `max_overflow=0` und
+  `pool_timeout=5` Sekunden als einfache, begrenzte Ausgangskonfiguration.
 
 Unbekannte oder nicht wirksame Pragmas werden nicht stillschweigend akzeptiert.
 Die Session Factory verwendet SQLAlchemy-2-Stil und `expire_on_commit=False`.
-Normale Use Cases verwenden `Session.begin()`; der Queue-Claim erhält eine
-separat getestete `BEGIN IMMEDIATE`-Primitive. `SQLITE_BUSY` wird nur begrenzt
-mit kurzem Backoff erneut versucht und dann als operativer Persistenzfehler
-gemeldet. DB-Lock-Retry und fachlicher Job-Retry sind getrennt.
+Normale A.2-Transaktionstests verwenden `Session.begin()`. Eine spätere
+`BEGIN IMMEDIATE`-Primitive für den Queue-Claim gehört zum Dispatcher und wird
+nicht in A.2 vorweggenommen. A.2 übersetzt ein nach Ablauf des Busy-Timeouts
+verbleibendes `SQLITE_BUSY` in einen sicheren operativen Persistenzfehler;
+DB-Lock-Retry und fachlicher Job-Retry werden erst mit ihren Use Cases geplant.
+
+Diese Werte sind bewusst konservative Startannahmen für eine einzelne Control
+Plane und kein adaptiver Tuning-Mechanismus. Der kleine Pool begrenzt offene
+Verbindungen; SQLite bleibt ungeachtet der Leserzahl Single-Writer. Linux ist
+die Produktionsplattform, macOS nur Entwicklungsplattform. POSIX-Modi und
+Symlink-/Typprüfungen sind dort testbar, die zuverlässige automatische
+Erkennung aller Netzwerk- oder speziellen Dateisysteme ist jedoch nicht
+plattformübergreifend garantiert. Das Deployment muss deshalb zusätzlich ein
+lokales persistentes Volume attestieren. Abweichungen von Pool- oder Timeout-
+Werten erfordern Messdaten, aber keinen neuen Architekturmechanismus.
 
 ### 5.14 Transaktionsgrenzen
 
@@ -688,32 +719,51 @@ Offsite-Ablage und numerische Backup-Retention bleiben offene Betriebsfragen.
 ## 6. Tests und Nachweise
 
 In diesem Designschritt werden keine Persistenztests implementiert und keine
-SQLite-Datei erzeugt. Für die spätere Implementierung ist mindestens folgende
-Testmatrix vorgesehen:
+SQLite-Datei erzeugt. Die Implementierung trennt ihre Nachweise verbindlich
+nach dem tatsächlichen Phasenumfang.
 
-- Runtime-Version 1 wird sicher und eindeutig abgewiesen; Version 2 und
-  ungültige Pfade/Berechtigungen werden getestet,
-- frische Initialmigration mit genau sechs Fachtabellen und Upgrade von jeder
-  unterstützten Revision,
-- benannte Constraints, Foreign-Key-Enforcement, JSON-Validierung, Byte-Limits
-  und ungültige Statuswerte,
-- Idempotenz: gleicher Scope/Key/Payload, Konfliktpayload, Scope-Trennung,
-  Parallelzugriff und Neustart,
-- WAL-/Busy-Timeout-/Transaktionskonfiguration je Verbindung,
-- atomarer Job-Claim bei getrennten Sessions ohne doppelten Attempt,
-- Retry erzeugt eine neue Attempt-Zeile und erhält frühere Telemetrie,
-- `WAITING/EXTERNAL`, `SUSPENDED`, atomare Continuation-/Lease-Regel und
-  Wiederaufnahme ohne Verletzung des partiellen Unique-Index,
-- Lease Acquire/Heartbeat/Release/Expiry und Sleep Gate ohne Aktivitätszähler,
-- Restart mit `UNKNOWN`, pausiertem Dispatch und nicht bestätigtem Attempt,
-- Schutztests mit Sentinel-Secrets in allen begrenzten Nutzdatenfeldern,
-- Backup einer aktiven WAL-Datenbank und Restore in eine leere Umgebung,
-- SQLite-Batch-Umbauten mit Daten- und Constraint-Erhalt,
-- Linux-CI ohne reale Infrastruktur oder produktive Daten.
+### A.2 – verpflichtend
 
-SQLite-Concurrency-Tests verwenden getrennte Verbindungen und temporäre
-Dateidatenbanken; eine einzelne In-Memory-Verbindung belegt das Lockingverhalten
-nicht.
+- **Runtime-Konfiguration Version 2:** gültige Version-2-Konfiguration,
+  ausdrückliche Ablehnung von Version 1 für die persistenzfähige Control Plane,
+  unbekannte Felder sowie ungültige Pfade und Berechtigungen.
+- **SQLite-Verbindung, WAL und Foreign Keys:** Python-3.12-Transaktionsmodus,
+  WAL-Rückleseprüfung, `synchronous=FULL`, Busy-Timeout und aktivierte Foreign
+  Keys auf jeder neuen Pool-Verbindung.
+- **Alembic-Initialmigration:** Upgrade einer leeren Dateidatenbank bis zum
+  einzigen Head, korrekte Singleton-Zeile und keine Schemaerzeugung über
+  `create_all()`.
+- **Sechs Kerntabellen und Constraints:** exakt `jobs`, `attempts`, `leases`,
+  `worker_states`, `control_state` und `job_events` als OASIX-Fachtabellen;
+  benannte Foreign Keys, Unique-, Partial-Index-, Status- und Zeit-Constraints.
+- **Persistenz über Prozess-/Verbindungsneustarts:** geschriebene Kerndaten
+  bleiben nach `Engine.dispose()`, neuer Engine und mindestens einem
+  Subprozess-Smoke-Test unverändert lesbar.
+- **Transaktionen und Rollback:** atomare Mehrzeilen-Schreibvorgänge und
+  vollständiger Rollback bei Constraint- beziehungsweise simulierten Fehlern;
+  keine externen Aufrufe in offenen Transaktionen.
+- **Größenlimits und sicherer Umgang mit Daten:** Grenzfälle unterhalb, exakt
+  auf und oberhalb jedes Limits; JSON-Validierung sowie Sentinel-Secrets, die
+  abgewiesen werden und weder Datenbank noch Exceptions, Logs oder
+  Repräsentationen erreichen. Dies schließt die `execution_ref`-Regeln ein.
+- **Grundlegende Datenbankintegrität:** `integrity_check`,
+  `foreign_key_check`, erwartete Alembic-Revision und sicherer Fehler bei
+  unwirksamen Pflicht-Pragmas.
+
+Dateibasiertes SQLite wird mit temporären lokalen Datenbanken getestet. Wo
+mehrere Verbindungen erforderlich sind, werden tatsächlich getrennte
+Verbindungen verwendet; eine einzelne In-Memory-Verbindung belegt weder
+Poolverhalten noch Persistenz.
+
+### Spätere Phasen
+
+- Job-Claiming und Dispatcher einschließlich `BEGIN IMMEDIATE` und Konkurrenz,
+- Retry-Geschäftslogik und Erzeugung neuer Attempts,
+- Lease-Lifecycle, TTL/Heartbeat und Sleep-Gate,
+- Recovery, Worker-/Service-Probes und Reconciliation,
+- Manual-/Force-Sleep-Abläufe und Grace Period,
+- Agenten-, Service- und Power-Steuerung einschließlich der fünf verschobenen
+  Tabellen.
 
 ## 7. Einschränkungen, Risiken und offene Architekturfragen
 
@@ -737,47 +787,58 @@ nicht.
 - Ein SQLAlchemy-Abstraktionslayer garantiert keine verlustfreie spätere
   Migration zu PostgreSQL.
 
-### Vor Implementierung zu klären
+### Vor A.2-Implementierung zu entscheiden – im Review entschieden
 
-1. Welche UUID-Version wird für neue IDs verwendet?
-2. Welcher stabile interne Auth-/Tenant-Bezug liefert den
-   `idempotency_scope`, und wie wird der Request exakt kanonisiert?
-3. Erfolgt eine Runtime-Wiederaufnahme im selben `SUSPENDED`-Attempt oder als
-   neuer Attempt, und wie wird der alte Attempt im zweiten Fall terminalisiert?
-4. Wird zusätzlich zu REC-04 eine Fehlerklasse `INTERNAL` benötigt?
-5. Benötigt die MVP-Queue Prioritäten, Deadlines oder Fairnessregeln jenseits
-   deterministischem FIFO nach Fälligkeit?
-6. Wird die Retry-Policy bei Joberstellung eingefroren oder gilt nach Neustart
-   die aktuelle Runtime-Konfiguration?
-7. Welcher Wertebereich für `busy_timeout_ms` und welche Poolgröße bestehen den
-   Lasttest?
-8. Welche Heartbeat-/TTL-Werte, Purpose-Bezeichner und Owner-Formate gelten für
-   Leases?
-9. Welches Worker-Protokoll bestätigt eine `execution_ref` nach Restart
-   zweifelsfrei?
-10. Welche numerischen Retention-Fristen gelten für Jobs, Events, Attempts und
-    Leases, und ist eine längere Idempotenz-Tombstone-Frist erforderlich?
-11. Welcher externe Result Store liefert `result_ref`, und wie werden Zugriff,
-    Löschung und Referenzintegrität abgesichert?
-12. Welche verbindlichen RPO-/RTO-, Verschlüsselungs- und Offsite-Anforderungen
-    gelten für Backup und Restore?
-13. Wie wird der lokale Dateisystemtyp auf allen unterstützten
-    Produktionsplattformen zuverlässig geprüft beziehungsweise betrieblich
-    attestiert?
-14. Ab welcher gemessenen Last oder Betriebsanforderung wird PostgreSQL
-    verpflichtend?
+Das abgeschlossene Review hat die unmittelbar blockierenden Punkte entschieden;
+sie gelten als verbindliche, möglichst einfache Implementierungsannahmen:
 
-Diese Punkte sind keine stillschweigenden Annahmen. Sie werden vor dem jeweils
-betroffenen Implementierungsschritt entschieden. Die fünf verschobenen Tabellen
-erhalten erst dann ihr endgültiges Schema, wenn ihre fachlichen Verträge
-feststehen.
+1. **UUID-Konvention:** UUIDv4, kanonisch kleingeschrieben und mit
+   Bindestrichen, gespeichert als `VARCHAR(36)`.
+2. **Datenbankpfad und Rechte:** absoluter externer Pfad; kanonischer
+   existierender Elternpfad; existierendes Ziel nur als reguläre Datei und
+   nicht als Symlink; getrennt vom Secret-Verzeichnis; Linux-Zielmodi `0700`
+   für das Verzeichnis und `0600` für DB/WAL/SHM bei `umask 0077`.
+3. **Transaktionsmodus und Foreign Keys:** Python 3.12 mit
+   `sqlite3`-`autocommit=False`; `PRAGMA foreign_keys=ON` über den geprüften
+   Connect-Hook auf jeder Verbindung.
+4. **Busy-Timeout:** initial 5.000 ms und auf jeder Verbindung verifiziert.
+5. **Connection Pool:** `QueuePool(pool_size=5, max_overflow=0,
+   pool_timeout=5)`; keine adaptive Poolsteuerung und keine unbegrenzte
+   Verbindungsanlage.
+
+Damit ist keine weitere Architekturentscheidung vor Beginn der A.2-
+Implementierung offen. Die Implementierung muss jedoch nachweisen, welche
+Pfad-, Symlink-, POSIX-Modus- und Dateisystemprüfungen unter Linux und macOS
+tatsächlich zuverlässig verfügbar sind. Nicht portabel nachweisbare
+Mount-Eigenschaften bleiben als explizite Deployment-Voraussetzung dokumentiert;
+eine vollständige plattformübergreifende Netzdateisystemerkennung wird nicht
+behauptet.
+
+### Für spätere Phasen zurückgestellt
+
+1. Ableitung des stabilen Auth-/Tenant-`idempotency_scope` und exakte
+   Request-Kanonisierung für die Job-API.
+2. Wiederaufnahme im selben `SUSPENDED`-Attempt oder als neuer Attempt sowie
+   zugehörige Transition Guards.
+3. Zusätzliche Fehlerklasse `INTERNAL` und vollständige Retry-/Recovery-
+   Klassifikation.
+4. Queue-Prioritäten, Deadlines, Fairness und Dispatcher-Locking.
+5. Snapshot oder dynamische Anwendung der Retry-Policy nach Neustart.
+6. Lease-TTL, Heartbeat, Owner-/Purpose-Formate und Sleep-Gate.
+7. Worker-Protokoll zur zweifelsfreien Bestätigung einer `execution_ref`.
+8. Numerische Retention-Fristen und möglicher längerer Idempotenz-Tombstone.
+9. Externer Result Store samt Zugriff, Löschung und Referenzintegrität.
+10. RPO/RTO, konkrete Backup-Verschlüsselung, Offsite-Ablage und Rotation.
+11. Messbare Schwellen für einen Wechsel von SQLite zu PostgreSQL.
+
+Die fünf verschobenen Tabellen erhalten ihr endgültiges Schema erst mit den
+zugehörigen fachlichen Verträgen.
 
 ## 8. Abnahmestatus
 
-Der konsolidierte Entwurf ist dokumentiert, aber **nicht zur Implementierung
-freigegeben**. A.2 bleibt „Design in Arbeit“, bis die nächste Review-Freigabe
-erfolgt und die unmittelbar implementierungsrelevanten offenen Punkte entschieden
-sind.
+Der Architektur-Review ist abgeschlossen und der A.2-Entwurf ist
+**designseitig freigegeben**. Die Persistenz ist weiterhin nicht implementiert;
+dieses Dokument ist keine eigenständige Beauftragung für Anwendungscode.
 
 Es gibt keine Aussage über funktionierende Persistenz, Migrationen, Recovery
 oder Produktionsreife. Anwendungscode, Dependencies, Tests, Initialmigration
@@ -785,9 +846,6 @@ und Datenbankdateien folgen ausschließlich nach separater Freigabe.
 
 ## 9. GitHub-Referenzen
 
-- Commits: für diesen Design-Review noch keine
-- Pull Requests: für diesen Design-Review noch keine
-- CI-Läufe: für diesen Design-Review noch keine
-
-Referenzen werden erst nach tatsächlichem Commit beziehungsweise Pull Request
-ergänzt; zukünftige Links werden nicht vorweggenommen.
+- Design-Pull-Request:
+  [PR #3 – docs: design A2 persistence architecture](https://github.com/madebyzwen/oasix/pull/3)
+- Implementierungs-Commits und Persistenz-CI-Läufe: noch keine

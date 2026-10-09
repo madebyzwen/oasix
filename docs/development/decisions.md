@@ -80,7 +80,7 @@ ausdrücklich noch nicht implementierte Entscheidungen.
 
 ## OASIX-DEC-005 – SQLite als geplante MVP-Persistenz
 
-- **Status:** Im konsolidierten A.2-Design festgelegt; Implementierung und
+- **Status:** Im finalisierten A.2-Design festgelegt; Implementierung und
   Produktionsvalidierung ausstehend
 - **Kontext:** Jobs, Attempts, Queues, Leases, Control-State und zuordenbare
   Telemetrie benötigen eine transaktionale, migrationsfähige Persistenz auf der
@@ -173,7 +173,7 @@ ausdrücklich noch nicht implementierte Entscheidungen.
 
 ## OASIX-DEC-009 – Explizite Transaktionen und versionierte Alembic-Migrationen
 
-- **Status:** Im konsolidierten A.2-Design festgelegt; Implementierung ausstehend
+- **Status:** Im finalisierten A.2-Design festgelegt; Implementierung ausstehend
 - **Kontext:** Job-/Attempt-Übergänge, Lease-Operationen und Recovery dürfen bei
   Abstürzen keinen teilweise aktualisierten Zustand hinterlassen. Das Schema
   muss gemäß JOB-04 migrationsfähig sein.
@@ -197,7 +197,7 @@ ausdrücklich noch nicht implementierte Entscheidungen.
 
 ## OASIX-DEC-010 – Persistenzgrenzen und Lease-Autorität
 
-- **Status:** Im konsolidierten A.2-Design festgelegt; Implementierung ausstehend
+- **Status:** Im finalisierten A.2-Design festgelegt; Implementierung ausstehend
 - **Kontext:** Die Control Plane benötigt persistenten Betriebszustand, darf
   aber Konfiguration nicht duplizieren oder parallele Aktivitätszähler führen.
 - **Gewählte Lösung:** Die externe Runtime-Konfiguration bleibt autoritativ für
@@ -225,16 +225,17 @@ ausdrücklich noch nicht implementierte Entscheidungen.
 
 ## OASIX-DEC-011 – Runtime-Schema Version 2 für Persistenz
 
-- **Status:** Im konsolidierten A.2-Design festgelegt; Implementierung ausstehend
+- **Status:** Im finalisierten A.2-Design festgelegt; Implementierung ausstehend
 - **Kontext:** Die bisherige Runtime-Version 1 enthält Worker, Services und
   Policies, aber keinen sicheren, extern konfigurierten Datenbankpfad. Ein
   stiller Default oder eine neue Bootstrap-Variable würde die vorhandene
   Versions- beziehungsweise Quellengrenze verletzen.
 - **Gewählte Lösung:** Runtime-`schema_version: 2` ergänzt eine strikt
   validierte `persistence`-Sektion mit absolutem lokalem `database_path` und
-  begrenztem `busy_timeout_ms`. Bootstrap bleibt unverändert auf YAML- und
-  Secret-Quelle beschränkt. Die persistenzfähige Control Plane weist Version 1
-  ausdrücklich ab; sie deutet Version 1 weder um noch ergänzt sie automatisch.
+  positivem `busy_timeout_ms` mit 5.000 ms Default. Bootstrap bleibt
+  unverändert auf YAML- und Secret-Quelle beschränkt. Die persistenzfähige
+  Control Plane weist Version 1 ausdrücklich ab; sie deutet Version 1 weder um
+  noch ergänzt sie automatisch.
 - **Begründung:** Der DB-Pfad bleibt installationsspezifische Runtime-
   Konfiguration, während die Versionsgrenze eine vollständige Startup-
   Validierung ohne versteckte Defaults ermöglicht.
@@ -251,7 +252,7 @@ ausdrücklich noch nicht implementierte Entscheidungen.
 
 ## OASIX-DEC-012 – Scope-bezogene, digestbasierte Job-Idempotenz
 
-- **Status:** Im konsolidierten A.2-Design festgelegt; API-Implementierung und
+- **Status:** Im finalisierten A.2-Design festgelegt; API-Implementierung und
   Retention-Frist ausstehend
 - **Kontext:** Ein global eindeutiger, im Klartext gespeicherter
   `idempotency_key` kollidiert zwischen unabhängigen Clients und vergrößert die
@@ -275,3 +276,30 @@ ausdrücklich noch nicht implementierte Entscheidungen.
   Replay-Schutz bleiben vor der Job-API zu entscheiden.
 - **Quellen:** Requirement JOB-01, SEC-01, SEC-03 und AC-10;
   [Phase-A.2-Design](phases/A2-persistence.md#512-idempotenzvertrag)
+
+## OASIX-DEC-013 – Einfache, begrenzte SQLite-Verbindungsbasis
+
+- **Status:** Im finalisierten A.2-Design festgelegt; Implementierung ausstehend
+- **Kontext:** Python 3.12, SQLite und SQLAlchemy benötigen explizite
+  Transaktions-, Foreign-Key- und Poolvorgaben, damit Plattformdefaults nicht
+  unbemerkt die Persistenzsemantik verändern.
+- **Gewählte Lösung:** IDs verwenden UUIDv4. `sqlite3` läuft mit
+  `autocommit=False`; ein SQLAlchemy-Connect-Hook aktiviert und verifiziert
+  `PRAGMA foreign_keys=ON` auf jeder Verbindung. Der initiale Busy-Timeout
+  beträgt 5.000 ms. Der file-basierte Engine-Pool ist ein `QueuePool` mit
+  `pool_size=5`, `max_overflow=0` und `pool_timeout=5` Sekunden. Pfad-, Datei-
+  und POSIX-Rechteprüfungen erfolgen vor Bereitstellung der Persistenz.
+- **Begründung:** Die Werte bilden eine kleine, deterministische und testbare
+  Ausgangsbasis für genau eine Control Plane, ohne adaptive Poolsteuerung oder
+  zusätzliche Locking-Abstraktionen.
+- **Berücksichtigte Alternativen:** Legacy-Transaktionsmodus, implizite
+  Foreign-Key-Aktivierung, unbegrenzter Overflow und ein komplexer eigener
+  Connection Manager wurden verworfen.
+- **Konsequenzen und Trade-offs:** SQLite bleibt Single-Writer. Linux ist die
+  Produktions-, macOS die Entwicklungsplattform. Symlink-, Typ- und POSIX-
+  Prüfungen sind testbar; eine vollständige automatische Erkennung aller
+  Netzwerkdateisysteme ist nicht portabel und bleibt zusätzlich eine
+  Deployment-Verantwortung. Andere Pool-/Timeout-Werte benötigen Messdaten.
+- **Quellen:** Requirement JOB-03, JOB-04 und CFG-01;
+  [Phase-A.2-Design](phases/A2-persistence.md#513-engine-sessions-und-sqlite-pragmas),
+  [PR #3](https://github.com/madebyzwen/oasix/pull/3)
