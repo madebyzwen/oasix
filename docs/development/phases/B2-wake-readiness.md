@@ -86,7 +86,7 @@ geändert.
 | Vollständige pytest-Suite | lokal, macOS, Python 3.12 | 249 bestanden | `feature/b-llm-path` |
 | Ruff Linting und Formatprüfung | lokal, macOS, Python 3.12 | bestanden, 54 Dateien geprüft | `feature/b-llm-path` |
 | Paket-, Import- und Diff-Prüfung | lokal | bestanden | `feature/b-llm-path` |
-| Linux-CI | GitHub Actions, Ubuntu, Python 3.12 | nach Push ausstehend | zukünftiger Phase-B-Pull-Request |
+| Linux-CI | GitHub Actions, Ubuntu, Python 3.12 | erfolgreich | [Lauf `38002248222`](https://github.com/madebyzwen/oasix/actions/runs/38002248222) |
 
 Alle Tests verwenden Fakes beziehungsweise HTTPX-Testtransporte. Es werden
 weder echte Broadcast-Pakete noch produktive HTTP-Anfragen gesendet.
@@ -112,8 +112,8 @@ begonnen.
 
 ## 9. GitHub-Referenzen
 
-- Commits: `feat(worker): implement wake and readiness orchestration` auf
-  `feature/b-llm-path`; vollständiger SHA nach Commit im Pull Request
-- Pull Requests: nach Abschluss beziehungsweise Stopp der sequenziellen Arbeit
-  zu erstellen
-- CI-Läufe: nach Push und Pull-Request-Erstellung ausstehend
+- Commits: [`c155dbdad82305cde53ed37e09cdf51b8f508e87`](https://github.com/madebyzwen/oasix/commit/c155dbdad82305cde53ed37e09cdf51b8f508e87)
+  (`feat(worker): implement wake and readiness orchestration`)
+- Pull Requests: [PR #6](https://github.com/madebyzwen/oasix/pull/6), offen und
+  nicht gemergt
+- CI-Läufe: [Linux-CI](https://github.com/madebyzwen/oasix/actions/runs/38002248222)

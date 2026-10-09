@@ -25,6 +25,7 @@ Vorgaben konkreten Implementierungsphasen zu und unterscheiden dabei zwischen:
 - [Phase A.3.2 – Strukturiertes Logging](phases/A3-logging.md)
 - [Phase B.1 – HTTP-Service-Readiness](phases/B1-http-readiness.md)
 - [Phase B.2 – Wake-on-LAN und Bereitschaft](phases/B2-wake-readiness.md)
+- [Phase B.3 – LLM-Proxy-Abhängigkeiten](phases/B3-llm-proxy-blocked.md)
 - [Vorlage für zukünftige Phasen](templates/phase-template.md)
 
 Das A.2-Design ist abgeschlossen. A.2.1 implementiert Runtime-Schema v2 und das
@@ -47,7 +48,9 @@ konfigurierte Wake-on-LAN-Ausführung und eine begrenzte servicebezogene
 Bereitschaftsorchestrierung für den aktiven Worker. Beide Umfänge sind lokal
 geprüft, aber bis zur unabhängigen Review-Abnahme noch nicht freigegeben.
 LLM-Proxy, Streaming und LLM-Telemetrie bleiben den folgenden B-Teilphasen
-vorbehalten.
+vorbehalten. B.3 wurde vor der produktiven Implementierung gestoppt, weil der
+verpflichtende Lease-Lifecycle und die Client-API-Authentifizierungsverträge
+noch fehlen. B.4 und B.5 wurden deshalb nicht begonnen.
 
 ## Pflegeregeln
 

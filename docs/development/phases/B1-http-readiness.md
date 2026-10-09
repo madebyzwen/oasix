@@ -83,7 +83,7 @@ kompatibel; es wurde keine Datenbankmigration angelegt.
 | Vollständige pytest-Suite | lokal, macOS, Python 3.12 | 238 bestanden | `feature/b-llm-path` |
 | Ruff Linting und Formatprüfung | lokal, macOS, Python 3.12 | bestanden, 49 Dateien geprüft | `feature/b-llm-path` |
 | Paket-, Import- und Diff-Prüfung | lokal | bestanden | `feature/b-llm-path` |
-| Linux-CI | GitHub Actions, Ubuntu, Python 3.12 | nach Push ausstehend | zukünftiger Phase-B-Pull-Request |
+| Linux-CI | GitHub Actions, Ubuntu, Python 3.12 | erfolgreich | [Lauf `38002248222`](https://github.com/madebyzwen/oasix/actions/runs/38002248222) |
 
 Die Tests verwenden keine echten Worker, Proxies, Secrets außerhalb der
 temporären Testverzeichnisse oder Netzwerkdienste. Verhalten gegen einen realen
@@ -109,7 +109,8 @@ begonnen.
 
 ## 9. GitHub-Referenzen
 
-- Commits: `feat(worker): implement HTTP service readiness adapter` auf
-  `feature/b-llm-path`; vollständiger SHA nach Commit im Pull Request
-- Pull Requests: nach dem ersten Push zu erstellen
-- CI-Läufe: nach dem ersten Push ausstehend
+- Commits: [`462fb7b1c1d31ac5d5413eda686e9bf17896889e`](https://github.com/madebyzwen/oasix/commit/462fb7b1c1d31ac5d5413eda686e9bf17896889e)
+  (`feat(worker): implement HTTP service readiness adapter`)
+- Pull Requests: [PR #6](https://github.com/madebyzwen/oasix/pull/6), offen und
+  nicht gemergt
+- CI-Läufe: [Linux-CI](https://github.com/madebyzwen/oasix/actions/runs/38002248222)
