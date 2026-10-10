@@ -536,9 +536,13 @@ Behandlung alter Konfigurationen:
 
 - `schema_version: 1` bleibt das historische Format ohne Persistenzsektion,
   wird vom aktuellen Runtime-Loader aber nicht mehr akzeptiert.
-- Die persistenzfähige Control Plane startet nur mit Version 2. Version 1 wird
-  sicher abgewiesen; es gibt weder stillen Defaultpfad noch automatische
-  Umdeutung oder In-place-Migration der YAML-Datei.
+- Im A.2-Umfang startete die persistenzfähige Control Plane nur mit Version 2.
+  Die spätere additive Version 3 aus
+  [OASIX-DEC-020](../decisions.md#oasix-dec-020--additives-runtime-schema-3-und-client-api-authentifizierung)
+  übernimmt die Persistenzsektion unverändert und wird deshalb ebenfalls
+  akzeptiert. Version 1 bleibt sicher abgewiesen; es gibt weder stillen
+  Defaultpfad noch automatische Umdeutung oder In-place-Migration der
+  YAML-Datei.
 - Die manuelle Umstellung besteht aus dem expliziten Setzen von Version 2 und
   dem Ergänzen der validierten `persistence`-Sektion.
 - Bootstrap bleibt ausschließlich für `OASIX_CONFIG_FILE` und
@@ -735,7 +739,8 @@ beschriebene Produktions-Restore-Verfahren.
 
 Der spätere Startup-/Recovery-Ablauf ist geplant als:
 
-1. Runtime-Konfiguration Version 2 und Secrets vollständig validieren.
+1. Runtime-Konfiguration Version 2 beziehungsweise einen kompatiblen additiven
+   Nachfolger und Secrets vollständig validieren.
 2. DB-Pfad prüfen, Datenbank öffnen, Pragmas und Alembic-Revision validieren.
 3. Dispatch `PAUSED_RECOVERY` setzen, Prozessinstanz persistieren und Worker auf
    `UNKNOWN` setzen.

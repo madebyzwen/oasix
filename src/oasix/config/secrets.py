@@ -210,6 +210,9 @@ def collect_secret_references(config: RuntimeConfig) -> frozenset[SecretReferenc
         for service in worker.services.values():
             if service.auth.method != "none":
                 references.add(service.auth.secret)
+    if config.client_auth is not None:
+        for client in config.client_auth.clients.values():
+            references.update(client.key_secrets)
     return frozenset(references)
 
 

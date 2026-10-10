@@ -237,7 +237,8 @@ ausdrücklich noch nicht implementierte Entscheidungen.
 
 ## OASIX-DEC-011 – Runtime-Schema Version 2 für Persistenz
 
-- **Status:** Akzeptiert und in A.2.1 implementiert
+- **Status:** Akzeptiert und in A.2.1 implementiert; durch die additive Version
+  3 aus OASIX-DEC-020 erweitert
 - **Kontext:** Die bisherige Runtime-Version 1 enthält Worker, Services und
   Policies, aber keinen sicheren, extern konfigurierten Datenbankpfad. Ein
   stiller Default oder eine neue Bootstrap-Variable würde die vorhandene
@@ -254,11 +255,12 @@ ausdrücklich noch nicht implementierte Entscheidungen.
 - **Berücksichtigte Alternativen:** Fest codierter Pfad, Datenbank-URL,
   automatische Version-1-Aufwertung und eine weitere `OASIX_`-
   Umgebungsvariable wurden verworfen.
-- **Konsequenzen und Trade-offs:** Deployments müssen ihre YAML manuell auf
+- **Konsequenzen und Trade-offs:** Deployments mussten ihre YAML manuell auf
   Version 2 anheben. Der Zielpfad benötigt ein lokales persistentes Volume,
-  restriktive Rechte und Platz für DB, WAL und SHM. Der aktuelle Loader weist
-  Version 1 sicher ab; es gibt keinen stillen Fallback und keine automatische
-  Aktualisierung der YAML-Datei.
+  restriktive Rechte und Platz für DB, WAL und SHM. Version 3 übernimmt diese
+  Persistenzsektion unverändert und ergänzt ausschließlich Client-
+  Authentifizierung. Der Loader weist Version 1 weiter sicher ab; es gibt
+  keinen stillen Fallback und keine automatische Aktualisierung der YAML-Datei.
 - **Quellen:** Requirement CFG-01, CFG-02, JOB-03 und JOB-04;
   [Phase-A.2-Design](phases/A2-persistence.md#511-runtime-konfiguration-schema_version-2),
   [Runtime-Modelle](../../src/oasix/config/models.py)
@@ -417,3 +419,255 @@ ausdrücklich noch nicht implementierte Entscheidungen.
   OBS-01, OBS-03, REC-04 und AC-10;
   [Phase A.3.2](phases/A3-logging.md),
   [Logging-Implementierung](../../src/oasix/logging/core.py)
+
+## OASIX-DEC-017 – Isolierter asynchroner HTTP-Readiness-Adapter
+
+- **Status:** In B.1 implementiert, unabhängig geprüft und freigegeben
+- **Kontext:** Service-Readiness muss asynchron, servicebezogen und anhand der
+  extern validierten Worker-Konfiguration geprüft werden. Authentifizierung darf
+  nur aus aufgelösten Secret-Referenzen stammen; Redirects, Prozess-Proxies und
+  Transportdetails dürfen die Sicherheitsgrenze nicht umgehen.
+- **Gewählte Lösung:** Ein an den aktiven Worker gebundener Adapter implementiert
+  den vorhandenen `ServiceReadinessProbe` mit HTTPX. Er baut pro Dienst genau
+  die konfigurierte GET-/HEAD-Anfrage, injiziert Bearer- oder Header-Secrets erst
+  in das Request-Objekt, verwendet den konfigurierten Readiness-Timeout und
+  wertet ausschließlich den Statuscode aus. `follow_redirects=False` und
+  `trust_env=False` sind explizit gesetzt. Der Adapter besitzt einen
+  kontrollierten asynchronen Lebenszyklus für seinen Connection-Pool.
+- **Begründung:** HTTPX stellt einen nativen Async-Client, explizite Timeouts und
+  injizierbare Testtransporte bereit. Die geschlossene OASIX-Schicht verhindert,
+  dass Endpunkte, Providerfehler oder Credentials in öffentliche Fehler gelangen.
+- **Berücksichtigte Alternativen:** Ein eigener HTTP-/TLS-Client auf Basis von
+  `asyncio`, synchrone Requests in Threads, automatische Redirects und
+  Umgebungs-Proxies wurden wegen höherer Komplexität beziehungsweise
+  unkontrollierter Netzwerkziele verworfen.
+- **Konsequenzen und Trade-offs:** HTTPX ist eine neue Laufzeitabhängigkeit. Der
+  Besitzer muss den Adapter schließen. Ein unerwarteter HTTP-Status ist ein
+  bestätigtes `ready=False`; nur Timeout und technische Kommunikation werden zu
+  Exceptions. Der Adapter führt weder Wake-up noch Zustandsübergänge aus.
+- **Quellen:** Requirement CFG-02 bis CFG-05, WRK-03 bis WRK-05, SEC-02,
+  SEC-03 und AC-10; [Phase B.1](phases/B1-http-readiness.md),
+  [HTTPX Async Support](https://www.python-httpx.org/async/),
+  [HTTPX Environment Variables](https://www.python-httpx.org/environment_variables/)
+
+## OASIX-DEC-018 – Begrenzte Wake- und Readiness-Orchestrierung ohne State-Automat
+
+- **Status:** In B.2 implementiert, unabhängig geprüft und freigegeben
+- **Kontext:** Ein Wake-on-LAN-Paket bestätigt nur die Übergabe eines
+  Netzwerkdatagramms. Tatsächliche Bereitschaft darf erst nach erfolgreichen
+  servicebezogenen Probes angenommen werden. v3.4 verlangt begrenzte Versuche,
+  konfigurierten Backoff und optionalen Jitter, legt in B.2 aber keinen
+  persistenten Worker-State-Automaten fest.
+- **Gewählte Lösung:** Ein aktiver-worker-gebundener Controller erzeugt das
+  standardisierte 102-Byte-Magic-Packet und sendet es per UDP-Broadcast an das
+  konfigurierte Ziel. Ein separater Orchestrator prüft zunächst Readiness,
+  führt danach höchstens `retry.wake.max_attempts` Wake-Versuche aus und prüft
+  nach jedem konfigurierten Delay alle angeforderten Services. Der Backoff wird
+  an `max_delay_seconds` begrenzt; optionaler Jitter variiert ihn symmetrisch um
+  den konfigurierten Anteil. Wake und jede Probe werden zusätzlich durch
+  `readiness_timeout_seconds` begrenzt.
+- **Begründung:** Wake-Transport, Readiness-Probe und Orchestrierung bleiben
+  getrennte Verantwortlichkeiten. Nur bestätigte Service-Readiness öffnet das
+  Gate; weder Datagrammversand noch ein einzelner positiver Dienst genügen.
+- **Berücksichtigte Alternativen:** Wake-Erfolg als `READY`, unbeschränkte
+  Polling-Schleifen, feste Retry-Zeiten, parallele Aktivitätszähler und ein in
+  B.2 vorgezogener persistenter State-Automat wurden ausgeschlossen.
+- **Konsequenzen und Trade-offs:** B.2 setzt und persistiert bewusst keinen
+  Worker-State. Erschöpfte Versuche führen zu einem festen
+  `WorkerUnavailableError`. Die aktuelle Probe-Reihenfolge ist deterministisch
+  und sequenziell; hohe Servicezahlen könnten später eine begrenzte parallele
+  Prüfung rechtfertigen. DNS- und UDP-Verhalten realer Broadcast-Netze bleibt
+  durch einen Deployment-Smoke-Test zu prüfen.
+- **Quellen:** Requirement CFG-02, CFG-05, WRK-03 bis WRK-05, PWR-02, REC-03
+  und AC-03; [Phase B.2](phases/B2-wake-readiness.md)
+
+## OASIX-DEC-019 – Persistenter idempotenter Lease-Lifecycle
+
+- **Status:** In C.1 implementiert, unabhängig geprüft und freigegeben
+- **Kontext:** Jede aktive Worker-Nutzung benötigt nach LSE-01 bis LSE-03 eine
+  persistente Lease. Das A.2-Schema enthält alle erforderlichen Spalten, hatte
+  aber noch keinen fachlichen Vertrag für Acquire, Heartbeat/Renew, Release,
+  Expiry und konkurrierende Wiederholungen.
+- **Gewählte Lösung:** Ein sessiongebundener `LeaseLifecycle` verwendet die vom
+  Aufrufer kontrollierte kurze Transaktion. Acquire erzeugt eine UUIDv4 oder
+  akzeptiert eine bereits vor der Operation stabilisierte UUIDv4 als
+  Idempotenzschlüssel. Wiederholung ist nur bei derselben unveränderlichen
+  Lease-Identität und noch aktiver Zeile erfolgreich. Diese Identität umfasst
+  Worker, Owner, Purpose und optionale Job-/Attempt-Bezüge, nicht die
+  veränderliche Ablaufzeit. Renew aktualisiert mit einem atomaren
+  SQL-Prädikat nur nicht freigegebene und noch nicht abgelaufene Leases, bewegt
+  den Heartbeat nicht rückwärts und verkürzt das Ablaufdatum nicht. Release
+  bewahrt bei Wiederholung die erste Freigabe. Aktivität ist ausschließlich
+  `released_at IS NULL AND expires_at > observed_at`; historische Zeilen
+  bleiben erhalten.
+- **Begründung:** Der Vertrag erfüllt die alleinige Autorität der Lease Registry
+  ohne Aktivitätszähler und schützt Konkurrenzfälle mit den vorhandenen
+  SQLite-Constraints sowie atomaren Insert-/Update-Anweisungen. Eine Migration
+  ist nicht erforderlich.
+- **Berücksichtigte Alternativen:** In-Memory-Leases, automatische
+  Reaktivierung abgelaufener IDs, parallele Nutzungszähler, Löschen bei Ablauf,
+  implizite Repository-Commits und unbeschränkte interne Lock-Retries wurden
+  ausgeschlossen.
+- **Konsequenzen und Trade-offs:** TTLs sind positive ganze Sekunden und werden
+  über eine injizierbare UTC-Uhr als Epoch-Mikrosekunden persistiert. Owner,
+  Purpose und Release-Grund sind generische technische IDs und dürfen keine
+  Secrets oder Freitext-Payloads enthalten. Die ursprüngliche TTL ist nach
+  Renew nicht aus `created_at` und `expires_at` rekonstruierbar, weil
+  `expires_at` veränderlich ist. Wiederholtes Acquire prüft sie daher nicht und
+  verändert die bestehende Gültigkeit nicht; eine Verlängerung erfordert
+  Renew. SQLite bleibt Single-Writer;
+  konkurrierende Operationen können nach dem Busy-Timeout sicher scheitern und
+  müssen als vollständige kurze Transaktion mit derselben Lease-ID wiederholt
+  werden. Verwaiste Leases werden durch Ablauf inaktiv, ihre spätere Bereinigung
+  und der reale Recovery-Abgleich sind nicht Teil von C.1.
+- **Quellen:** Requirement LSE-01 bis LSE-03, PWR-01, REC-01, REC-04, SEC-03
+  und AC-04; [Phase C.1](phases/C1-lease-lifecycle.md),
+  [Lease-Lifecycle](../../src/oasix/persistence/leases.py),
+  [Lease-Repository](../../src/oasix/persistence/repositories.py)
+
+## OASIX-DEC-020 – Additives Runtime-Schema 3 und Client-API-Authentifizierung
+
+- **Status:** In B.3.0 implementiert, unabhängig geprüft und freigegeben; in
+  B.3.1 produktiv eingebunden
+- **Kontext:** SEC-01 verlangt Authentifizierung für Client- und Management-
+  APIs sowie die Trennung unprivilegierter Inference-Nutzung von
+  administrativen Power-Operationen. Runtime-Version 2 kennt ausschließlich
+  Worker-/Provider-Credentials und kann Client-Identitäten deshalb nicht
+  widerspruchsfrei aufnehmen.
+- **Gewählte Lösung:** Runtime-Version 3 ergänzt verpflichtend `client_auth`
+  mit generischen Client-IDs, mindestens einer externen Secret-Referenz und
+  mindestens einer expliziten Capability je Identität. Die geschlossenen
+  Capabilities lauten zunächst `inference` und `administration`; keine davon
+  impliziert die andere oder künftige Operationen. Version-2-Konfigurationen
+  bleiben für vorhandene Komponenten gültig, können aber keinen
+  Client-Authenticator erzeugen. Version 2 darf `client_auth` nicht enthalten,
+  Version 3 darf die Sektion nicht auslassen. Der Authenticator hält nur
+  prozesslokal gepepperte HMAC-SHA-256-Digests und vergleicht einen Request mit
+  allen konfigurierten Digests über `hmac.compare_digest()`. Doppelte Client-
+  Werte sowie Wert- oder Referenzgleichheit mit Provider-Credentials werden
+  beim Startup abgewiesen. Mehrere eindeutige Referenzen derselben Identität
+  bilden das kontrollierte Rotationsfenster.
+- **Begründung:** Eine explizite Versionsgrenze verhindert, dass bestehende
+  Version-2-Dateien stillschweigend eine sicherheitsrelevante Sektion mit
+  Defaults erhalten. Geschlossene Capabilities halten Authentifizierung und
+  Autorisierung getrennt und verhindern einen impliziten Superuser. Die
+  vorhandene Secret-Quelle bleibt allein für Schlüsselwerte zuständig.
+- **Berücksichtigte Alternativen:** Client-Schlüssel als Provider-Credentials,
+  Klartext in YAML, ein globaler Schlüssel, implizite Administratorrechte,
+  freie Rollenstrings, eine API-Key-Datenbank, Benutzerverwaltung und SSO
+  wurden ausgeschlossen. Ein Bruch von Runtime-Version 2 ohne neue
+  `schema_version` wurde ebenfalls verworfen.
+- **Konsequenzen und Trade-offs:** B.3 und spätere Management-Routen müssen vor
+  Bereitstellung den Authenticator aufbauen und für jede Operation die konkrete
+  Capability prüfen. Schlüsselrotation erfolgt zunächst durch überlappende
+  Referenzen und kontrollierte Neustarts; Hot Reload ist nicht implementiert.
+  Die HMAC-Digests vermeiden langlebige Klartextwerte im Authenticator, ersetzen
+  aber weder starke zufällige Schlüssel noch Dateirechte und sichere
+  Deployment-Prozesse. Persistence akzeptiert Version 2, 3 und die additive
+  Version 4 aus OASIX-DEC-021, weil deren `persistence`-Vertrag identisch ist.
+- **Quellen:** Requirement CFG-01, CFG-03, SEC-01 bis SEC-03 und AC-10;
+  [Phase B.3.0](phases/B3-client-auth.md),
+  [Authentifizierung](../../src/oasix/auth/core.py),
+  [Konfigurationsmodelle](../../src/oasix/config/models.py)
+
+## OASIX-DEC-021 – Lease-geschützter LLM-Gateway-Pfad
+
+- **Status:** In B.3.1 implementiert, unabhängig geprüft und freigegeben
+- **Kontext:** Der produktive LLM-Pfad muss Client-Authentifizierung,
+  Concurrency, die autoritative persistente Lease, Wake/Readiness und den
+  Provideraufruf so komponieren, dass keine Worker-Nutzung ungeschützt oder
+  während einer offenen SQLite-Schreibtransaktion stattfindet.
+- **Gewählte Lösung:** Runtime-Schema 4 ergänzt verpflichtende Inference-
+  Zeitparameter. `POST /v1/chat/completions` authentifiziert genau einen
+  Bearer-Header, verlangt `inference`, reserviert ohne Warteschlange einen
+  prozesslokalen Concurrency-Slot, validiert einen auf 1 MiB begrenzten Request
+  und erwirbt danach eine persistente UUIDv4-Lease. Erst innerhalb dieser
+  Lease laufen Wake, Readiness und der konfigurierte LLM-Aufruf. Eine
+  Heartbeat-Task verlängert die Lease; Release und Slotfreigabe erfolgen erst
+  nach Ende der realen Nutzung. Jeder Datenbankschritt besitzt eine eigene
+  kurze Transaktion. Der HTTP-Transport deaktiviert Redirects und
+  Umgebungs-Proxies, begrenzt Zeit und Antwortgröße und validiert eine
+  geschlossene nicht streamende OpenAI-Teilmenge.
+- **Begründung:** Die feste Reihenfolge erfüllt SEC-01, AC-03 und LSE-01 bis
+  LSE-03, hält die Lease Registry als einzige Aktivitätsquelle und verhindert
+  unbeschränkte Warteschlangen. Eine neue Tabelle oder Migration ist dafür
+  nicht erforderlich.
+- **Berücksichtigte Alternativen:** Ungeschützter Betrieb mit Runtime-Version 2,
+  In-Memory-Leases, parallele Aktivitätszähler, Netzwerk-I/O in einer
+  Schreibtransaktion, Weitergabe von Client-Credentials, automatische
+  Redirects und ungeprüfte offene OpenAI-Payloads wurden ausgeschlossen.
+- **Konsequenzen und Trade-offs:** B.3.1 unterstützt genau einen aktivierten,
+  frei benannten Service mit `kind: llm` und für sich nur nicht streamende
+  Chat Completions. Das Concurrency-Limit gilt pro Prozess; der SQLite-MVP
+  setzt daher einen Gateway-Prozess voraus. B.4 ergänzt Streaming samt
+  Cancellation-Semantik, B.5 die sichere operative Telemetrie.
+- **Quellen:** Requirement SEC-01 bis SEC-03, LSE-01 bis LSE-03, AC-03 und
+  AC-10; [Phase B.3.1](phases/B3-llm-proxy.md),
+  [Gateway](../../src/oasix/llm/gateway.py),
+  [Lease-Adapter](../../src/oasix/llm/leases.py)
+
+## OASIX-DEC-022 – Inkrementelles SSE-Streaming mit explizitem Cleanup
+
+- **Status:** In B.4 implementiert, unabhängig geprüft und freigegeben
+- **Kontext:** Ein Streaming-Request nutzt den Worker noch nach Rückgabe des
+  HTTP-Response-Objekts aus der Route. Admission, Lease, Heartbeat und
+  Upstream dürfen deshalb weder an den Route-Return noch an einen einzelnen
+  Chunk gekoppelt werden. Client-Disconnect und späte Upstream- oder
+  Cleanup-Fehler müssen alle Ressourcen deterministisch beenden.
+- **Gewählte Lösung:** Die B.3.1-Admission wird als explizites Token an eine
+  verwaltete Streaming-Antwort übertragen. Vier geschachtelte Ebenen schließen
+  jeweils ihren direkten Async-Iterator beziehungsweise die HTTPX-Response.
+  Der Upstream wird inkrementell als SSE gelesen; Ereignisse, Gesamtgröße,
+  Laufzeit und ein geschlossenes Chat-Completion-Chunk-Schema sind begrenzt.
+  Sein `[DONE]` wird erst nach erfolgreichem Upstream-Ende und Lease-Release als
+  neuer finaler Marker an den Client gesendet. Ein später Fehler erzeugt ein
+  statisches SSE-Fehlerobjekt und keinen Erfolgsmarker.
+- **Begründung:** Python schließt bei einem abgebrochenen `async for`
+  verschachtelte Async-Generatoren nicht in allen Suspendierungszuständen
+  automatisch. Explizites `aclose()` auf jeder Eigentumsgrenze verhindert
+  weiterlaufende Upstreams, Heartbeats oder belegte Admission-Slots. Der
+  verzögerte Erfolgsmarker macht insbesondere Release-Fehler sichtbar.
+- **Berücksichtigte Alternativen:** Vollständiges Puffern, Freigabe der Lease
+  nach Route-Return, unkontrolliertes Durchreichen beliebiger Provider-SSE,
+  `[DONE]` vor Cleanup und unüberwachte Hintergrundaufgaben wurden
+  ausgeschlossen.
+- **Konsequenzen und Trade-offs:** Nach gesendeten HTTP-200-Headern kann ein
+  später Fehler nur innerhalb des SSE-Protokolls signalisiert werden. Harte
+  Limits von 1 MiB je Ereignis und 64 MiB insgesamt können sehr große legitime
+  Streams beenden. Offene providerabhängige Chunk-Erweiterungen sind nicht Teil
+  der unterstützten Teilmenge.
+- **Quellen:** Requirement LSE-01 bis LSE-03, SEC-03, OBS-01 und AC-03 bis
+  AC-10; [Phase B.4](phases/B4-streaming.md),
+  [Gateway](../../src/oasix/llm/gateway.py),
+  [LLM-Transport](../../src/oasix/llm/transport.py)
+
+## OASIX-DEC-023 – Geschlossene LLM-Request-Telemetrie
+
+- **Status:** In B.5 implementiert, unabhängig geprüft und freigegeben
+- **Kontext:** Der interaktive LLM-Pfad benötigt korrelierbare Wake-,
+  Readiness-, Request-, First-Token- und Token-Metriken, darf aber keine
+  Prompts, Antworten, Credentials, Endpunkte oder beliebige Exceptiondaten in
+  Logs übernehmen. Fehlende Providerwerte dürfen nicht geschätzt werden.
+- **Gewählte Lösung:** Ein pro Anfrage erzeugter `LlmRequestSpan` sammelt nur
+  allowlist-validierte technische IDs, monotone Zeitmarken und nicht negative
+  ganzzahlige Metriken. Service- und Orchestrierungsschichten ergänzen Werte an
+  ihrer jeweiligen Entstehungsstelle. Genau ein statisches terminales Ereignis
+  meldet Erfolg, kontrollierten Fehler oder Cancellation. Technische Fehler
+  werden ausschließlich an der Gateway-Grenze auf geschlossene Klassen und
+  feste Codes abgebildet.
+- **Begründung:** Eine vorgelagerte Typ- und Feldbegrenzung setzt die
+  Sicherheitsgarantie aus OASIX-DEC-016 fort, ohne nachträgliche Secret-
+  Heuristiken. Die monotone Uhr eignet sich für Laufzeiten unabhängig von
+  Zeitsprüngen; nicht vorhandene Streaming-Usage bleibt gemäß OBS-03 leer.
+- **Berücksichtigte Alternativen:** Freie Log-Mappings, Exception-
+  Serialisierung, Payload- oder Chunk-Logging, geschätzte Tokenzahlen,
+  dynamische Metriknamen und eine neue persistente Request-Telemetrietabelle
+  wurden ausgeschlossen.
+- **Konsequenzen und Trade-offs:** Die Allowlist muss für neue stabile
+  Kernmetriken bewusst erweitert werden. Authentifizierungsfehler erzeugen
+  keinen LLM-Requestspan. Persistente Attempt-Telemetrie folgt mit dem späteren
+  Job-Lifecycle; B.5 protokolliert ausschließlich den interaktiven Pfad.
+- **Quellen:** Requirement SEC-03, OBS-01 bis OBS-03 und AC-10;
+  [Phase B.5](phases/B5-telemetry-integration.md),
+  [Telemetrie](../../src/oasix/llm/telemetry.py),
+  [Logging-Grenze](../../src/oasix/logging/core.py)

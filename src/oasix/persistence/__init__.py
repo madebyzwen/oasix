@@ -2,6 +2,10 @@
 
 from oasix.persistence.database import PersistenceDatabase, initialize_persistence
 from oasix.persistence.errors import (
+    LeaseConflictError,
+    LeaseInactiveError,
+    LeaseLifecycleError,
+    LeaseNotFoundError,
     PersistenceConfigurationError,
     PersistenceConnectionError,
     PersistenceError,
@@ -12,6 +16,7 @@ from oasix.persistence.errors import (
     PersistenceOperationError,
     PersistenceValidationError,
 )
+from oasix.persistence.leases import LeaseLifecycle, UtcClock
 from oasix.persistence.migrations import EXPECTED_SCHEMA_REVISION, verify_schema_revision
 from oasix.persistence.models import Attempt, Base, ControlState, Job, JobEvent, Lease, WorkerState
 from oasix.persistence.repositories import PersistenceRepositories
@@ -34,6 +39,11 @@ __all__ = [
     "PersistenceOperationError",
     "PersistenceRepositories",
     "PersistenceValidationError",
+    "LeaseConflictError",
+    "LeaseInactiveError",
+    "LeaseLifecycle",
+    "LeaseLifecycleError",
+    "LeaseNotFoundError",
     "EXPECTED_SCHEMA_REVISION",
     "NonSecretReferenceAdapter",
     "PayloadSchemaRegistry",
@@ -46,6 +56,7 @@ __all__ = [
     "JobEvent",
     "Lease",
     "WorkerState",
+    "UtcClock",
     "initialize_persistence",
     "verify_schema_revision",
 ]

@@ -91,6 +91,8 @@ def _format_location(location: tuple[str | int, ...], error_type: str) -> str:
             safe_parts.append("<worker-id>")
         elif previous == "services":
             safe_parts.append("<service-id>")
+        elif previous == "clients":
+            safe_parts.append("<client-id>")
         elif error_type == "extra_forbidden" and index == len(location) - 1:
             safe_parts.append("<unknown-field>")
         elif part == "[key]":

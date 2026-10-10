@@ -105,7 +105,7 @@ und markiert nicht sauber beendete Attempts als `INTERRUPTED`. Nach einem
 Neustart werden Worker-Zustand, aktive Attempts und Leases mit der Realität
 abgeglichen. Retry- und Wake-up-Versuche sind begrenzt und konfigurierbar.
 
-## Geplante MVP-Phasen
+## MVP-Phasen
 
 | Phase | Ergebnis |
 | --- | --- |
@@ -191,15 +191,66 @@ für die Control Plane und nicht vertrauenswürdige Prozesse unveränderlich sei
 und sollen im Deployment read-only mit restriktiven Berechtigungen
 bereitgestellt werden.
 
+## Client-Authentifizierung und LLM-Gateway
+
+Runtime-`schema_version: 3` ergänzte die verpflichtende `client_auth`-Sektion.
+Jede generisch benannte Client-Identität verweist auf mindestens eine externe
+Secret-Datei und erhält ausschließlich explizit konfigurierte Berechtigungen:
+
+- `inference` für spätere Client-Anfragen unter `/v1/...`,
+- `administration` für ausdrücklich geschützte Management- und Power-
+  Operationen.
+
+Keine Berechtigung impliziert die andere oder künftige Operationen. Die
+Konfiguration enthält ausschließlich Secret-Referenzen; Provider- und Client-
+Credentials dürfen weder dieselbe Referenz noch denselben aufgelösten Wert
+verwenden. Mehrere eindeutige Referenzen derselben Identität erlauben ein
+kontrolliertes Rotationsfenster über Neustarts. Der Authenticator muss während
+des Startvorgangs unmittelbar nach dem Konfigurationsloader erzeugt werden,
+bevor eine API bereitgestellt wird:
+
+```python
+from oasix.auth import ClientAuthorizer, create_client_authenticator
+from oasix.config import load_startup_configuration
+
+configuration = load_startup_configuration()
+authenticator = create_client_authenticator(
+    configuration.runtime,
+    configuration.secrets,
+)
+authorizer = ClientAuthorizer()
+```
+
+Schlüsselwerte werden im langlebigen Authenticator nur als prozesslokal
+gepepperte Digests gehalten. Fehlende, ungültige und unbekannte Bearer-
+Credentials liefern dieselbe sichere Fehlerkategorie. Runtime-Version 2 bleibt
+für bestehende Komponenten gültig, kann aber keine Client-Authentifizierung
+oder ein Gateway initialisieren; Version 3 verlangt die vollständige neue
+Sektion und besitzt keine privilegierten Defaults.
+
+Runtime-`schema_version: 4` ergänzt die für den produktiven LLM-Pfad
+erforderlichen Request-, Lease- und Heartbeat-Zeitparameter. Das Gateway stellt
+derzeit genau `POST /v1/chat/completions` als geschlossene OpenAI-kompatible
+Teilmenge für nicht streamende und SSE-streamende Chat Completions bereit. Es
+authentifiziert und autorisiert vor jeder Nutzung, weist Überlast ohne
+Warteschlange ab, hält über Wake, Readiness und den gesamten Upstream-Aufruf
+eine persistente Lease und setzt ausschließlich die konfigurierte Provider-
+Authentifizierung. Request-, Response- und Stream-Größen sowie Timeouts sind
+begrenzt; Redirects und Umgebungs-Proxies sind deaktiviert. Bei Disconnect
+werden Upstream, Heartbeat, Lease und Admission explizit geschlossen. Die in
+B.5 ergänzte sichere Telemetrie erfasst verfügbare Wake-, Readiness-, Request-,
+First-Token- und Token-Metriken ohne Prompt- oder Antwortinhalte.
+
 ## SQLite-Persistenzfundament
 
-Die persistenzfähige Control Plane verwendet ausschließlich Runtime-
-`schema_version: 2`. Diese Version ergänzt `persistence.database_path` als
-absoluten, extern vorgegebenen Dateipfad und den positiven, auf höchstens
-60.000 ms begrenzten `persistence.busy_timeout_ms` mit 5.000 ms als Default.
-Version 1 wird nicht automatisch aufgewertet. Der Datenbankpfad ist keine
-Bootstrap-Variable und wird intern erst nach vollständiger Konfigurations- und
-Secret-Validierung verwendet:
+Runtime-`schema_version: 2` führte `persistence.database_path` als absoluten,
+extern vorgegebenen Dateipfad und den positiven, auf höchstens 60.000 ms
+begrenzten `persistence.busy_timeout_ms` mit 5.000 ms als Default ein. Die
+additiven Versionen 3 und 4 übernehmen diesen Persistenzvertrag unverändert;
+die Persistenzschicht akzeptiert daher alle drei Versionen. Version 1 wird nicht
+automatisch aufgewertet. Der Datenbankpfad ist keine Bootstrap-Variable und
+wird intern erst nach vollständiger Konfigurations- und Secret-Validierung
+verwendet:
 
 ```python
 from oasix.config import load_startup_configuration

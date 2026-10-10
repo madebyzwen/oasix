@@ -1,5 +1,22 @@
-schema_version: 2
+schema_version: 4
 active_worker: worker-primary
+
+client_auth:
+  clients:
+    inference-client:
+      key_secrets:
+        - source: file
+          name: client_inference_key
+        - source: file
+          name: client_inference_next_key
+      permissions:
+        - inference
+    operations-client:
+      key_secrets:
+        - source: file
+          name: client_admin_key
+      permissions:
+        - administration
 
 persistence:
   database_path: /absolute/path/provided-by-deployment/oasix.sqlite3
@@ -81,3 +98,7 @@ policies:
   concurrency:
     max_concurrent_jobs: 1
     max_concurrent_inference_requests: 2
+  inference:
+    request_timeout_seconds: 300
+    lease_ttl_seconds: 60
+    heartbeat_interval_seconds: 20.0

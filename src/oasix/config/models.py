@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
+from enum import StrEnum
 from pathlib import Path
 from types import MappingProxyType
 from typing import Annotated, Literal
@@ -36,6 +37,7 @@ type PositiveMultiplier = Annotated[StrictFloat, Field(ge=1.0)]
 type JitterRatio = Annotated[StrictFloat, Field(ge=0.0, le=1.0)]
 type StatusCode = Annotated[StrictInt, Field(ge=100, le=599)]
 type BusyTimeoutMilliseconds = Annotated[StrictInt, Field(ge=1, le=60_000)]
+type PositiveInterval = Annotated[StrictFloat, Field(gt=0.0)]
 
 
 class StrictModel(BaseModel):
@@ -63,6 +65,50 @@ class SecretReference(StrictModel):
         if value in {".", ".."}:
             raise ValueError("relative path names are not allowed")
         return value
+
+
+class ClientPermission(StrEnum):
+    """Explicit capabilities which a configured client may request."""
+
+    INFERENCE = "inference"
+    ADMINISTRATION = "administration"
+
+
+class ClientIdentitySettings(StrictModel):
+    """Secret references and explicit permissions for one generic API client."""
+
+    key_secrets: Annotated[tuple[SecretReference, ...], Field(min_length=1)] = Field(repr=False)
+    permissions: Annotated[tuple[ClientPermission, ...], Field(min_length=1)]
+
+    @model_validator(mode="after")
+    def reject_duplicates(self) -> ClientIdentitySettings:
+        if len(self.key_secrets) != len(set(self.key_secrets)):
+            raise ValueError("client key secret references must be unique")
+        if len(self.permissions) != len(set(self.permissions)):
+            raise ValueError("client permissions must be unique")
+        return self
+
+
+class ClientAuthenticationSettings(StrictModel):
+    """Configured API clients; credentials remain external secret references."""
+
+    clients: Annotated[Mapping[Identifier, ClientIdentitySettings], Field(min_length=1)]
+
+    @field_validator("clients")
+    @classmethod
+    def freeze_clients(
+        cls, value: Mapping[str, ClientIdentitySettings]
+    ) -> Mapping[str, ClientIdentitySettings]:
+        return MappingProxyType(dict(value))
+
+    @model_validator(mode="after")
+    def reject_shared_secret_references(self) -> ClientAuthenticationSettings:
+        references = [
+            reference for client in self.clients.values() for reference in client.key_secrets
+        ]
+        if len(references) != len(set(references)):
+            raise ValueError("client key secret references must not be shared")
+        return self
 
 
 class SshConnection(StrictModel):
@@ -273,12 +319,27 @@ class ConcurrencyLimits(StrictModel):
     max_concurrent_inference_requests: PositiveLimit
 
 
+class InferencePolicy(StrictModel):
+    """Bounded request and persistent lease timing for interactive inference."""
+
+    request_timeout_seconds: PositiveSeconds
+    lease_ttl_seconds: PositiveSeconds
+    heartbeat_interval_seconds: PositiveInterval
+
+    @model_validator(mode="after")
+    def require_heartbeat_before_expiry(self) -> InferencePolicy:
+        if self.heartbeat_interval_seconds >= self.lease_ttl_seconds:
+            raise ValueError("lease heartbeat interval must be shorter than its TTL")
+        return self
+
+
 class Policies(StrictModel):
     idle_timeout_seconds: PositiveSeconds
     readiness_timeout_seconds: PositiveSeconds
     force_sleep_grace_period_seconds: NonNegativeSeconds
     retry: RetryPolicies
     concurrency: ConcurrencyLimits
+    inference: InferencePolicy | None = None
 
 
 class PersistenceSettings(StrictModel):
@@ -298,11 +359,12 @@ class PersistenceSettings(StrictModel):
 class RuntimeConfig(StrictModel):
     """Fully validated runtime behavior; no bootstrap source locations are included."""
 
-    schema_version: Literal[2]
+    schema_version: Literal[2, 3, 4]
     active_worker: Identifier
     workers: Annotated[Mapping[Identifier, WorkerProfile], Field(min_length=1)]
     policies: Policies
     persistence: PersistenceSettings
+    client_auth: ClientAuthenticationSettings | None = None
 
     @field_validator("workers")
     @classmethod
@@ -313,6 +375,40 @@ class RuntimeConfig(StrictModel):
     def require_active_worker_profile(self) -> RuntimeConfig:
         if self.active_worker not in self.workers:
             raise ValueError("active_worker must reference a configured worker profile")
+        return self
+
+    @model_validator(mode="after")
+    def require_versioned_client_auth(self) -> RuntimeConfig:
+        if self.schema_version == 2 and self.client_auth is not None:
+            raise ValueError("client_auth requires runtime schema version 3")
+        if self.schema_version in {3, 4} and self.client_auth is None:
+            raise ValueError("runtime schema version 3 or 4 requires client_auth")
+        if self.schema_version in {2, 3} and self.policies.inference is not None:
+            raise ValueError("inference policy requires runtime schema version 4")
+        if self.schema_version == 4 and self.policies.inference is None:
+            raise ValueError("runtime schema version 4 requires inference policy")
+        return self
+
+    @model_validator(mode="after")
+    def separate_client_and_provider_secret_references(self) -> RuntimeConfig:
+        if self.client_auth is None:
+            return self
+
+        client_references = {
+            reference
+            for client in self.client_auth.clients.values()
+            for reference in client.key_secrets
+        }
+        provider_references: set[SecretReference] = set()
+        for worker in self.workers.values():
+            if worker.connection.ssh is not None:
+                provider_references.add(worker.connection.ssh.private_key)
+                provider_references.add(worker.connection.ssh.known_hosts)
+            for service in worker.services.values():
+                if service.auth.method != "none":
+                    provider_references.add(service.auth.secret)
+        if client_references & provider_references:
+            raise ValueError("client and provider secret references must be separate")
         return self
 
     @property
