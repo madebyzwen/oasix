@@ -29,6 +29,7 @@ from oasix.llm.models import (
     ChatCompletionResponse,
 )
 from oasix.llm.service import InferenceAdmission, InferenceConcurrencyGate, LlmProxyService
+from oasix.llm.telemetry import LlmRequestSpan, LlmTelemetry
 from oasix.llm.transport import (
     MAX_STREAM_EVENT_BYTES,
     MAX_STREAM_RESPONSE_BYTES,
@@ -53,10 +54,12 @@ __all__ = [
     "LlmPathError",
     "LlmProxyService",
     "LlmReadinessError",
+    "LlmRequestSpan",
     "LlmRequestError",
     "LlmUpstreamError",
     "LlmUpstreamProtocolError",
     "LlmUpstreamTimeoutError",
+    "LlmTelemetry",
     "MAX_CLIENT_REQUEST_BYTES",
     "MAX_STREAM_EVENT_BYTES",
     "MAX_STREAM_RESPONSE_BYTES",

@@ -78,12 +78,15 @@ def test_already_ready_worker_is_not_woken(valid_config_data: dict[str, Any]) ->
         _retry_policy(valid_config_data),
         1,
         sleep=sleep,
+        monotonic_ns=iter((1_000_000, 6_000_000)).__next__,
     )
-    asyncio.run(orchestrator.ensure_ready((ServiceId("llm"),)))
+    timing = asyncio.run(orchestrator.ensure_ready((ServiceId("llm"),)))
 
     assert wake.calls == 0
     assert readiness.calls == [ServiceId("llm")]
     assert sleeps == []
+    assert timing.readiness_latency_ms == 5
+    assert timing.wake_latency_ms is None
 
 
 def test_wake_success_does_not_imply_readiness_and_retries_are_bounded(
@@ -102,12 +105,15 @@ def test_wake_success_does_not_imply_readiness_and_retries_are_bounded(
         _retry_policy(valid_config_data),
         1,
         sleep=sleep,
+        monotonic_ns=iter((1_000_000, 3_000_000, 13_000_000)).__next__,
     )
-    asyncio.run(orchestrator.ensure_ready((ServiceId("llm"),)))
+    timing = asyncio.run(orchestrator.ensure_ready((ServiceId("llm"),)))
 
     assert wake.calls == 2
     assert len(readiness.calls) == 3
     assert sleeps == [10.0, 20.0]
+    assert timing.readiness_latency_ms == 12
+    assert timing.wake_latency_ms == 10
 
 
 def test_exhausted_wake_attempts_fail_without_unbounded_loop(

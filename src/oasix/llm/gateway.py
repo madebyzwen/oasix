@@ -47,7 +47,9 @@ from oasix.llm.service import (
     InferenceConcurrencyGate,
     LlmProxyService,
 )
+from oasix.llm.telemetry import LlmRequestSpan, LlmTelemetry
 from oasix.llm.transport import HttpLlmUpstream
+from oasix.logging import LogErrorClass, StructuredLogger
 from oasix.persistence import PersistenceDatabase, initialize_persistence
 from oasix.worker import (
     HttpServiceReadinessAdapter,
@@ -121,6 +123,7 @@ def create_llm_gateway_app(
     readiness_transport: httpx.AsyncBaseTransport | None = None,
     upstream_transport: httpx.AsyncBaseTransport | None = None,
     wake_sender: DatagramSender | None = None,
+    structured_logger: StructuredLogger | None = None,
     _owned_database: PersistenceDatabase | None = None,
 ) -> FastAPI:
     """Build a fully protected gateway or fail before exposing any route."""
@@ -164,6 +167,7 @@ def create_llm_gateway_app(
         readiness=orchestrator,
         upstream=upstream,
     )
+    telemetry = LlmTelemetry(structured_logger)
     resources = _GatewayResources(
         readiness=readiness,
         upstream=upstream,
@@ -188,6 +192,7 @@ def create_llm_gateway_app(
 
     @application.post("/v1/chat/completions")
     async def chat_completions(request: Request) -> Response:
+        request_started_at = telemetry.now()
         request_id = str(uuid.uuid4())
         try:
             _authenticate_inference(request, authenticator, authorizer)
@@ -207,12 +212,17 @@ def create_llm_gateway_app(
                 request_id,
             )
 
+        span = telemetry.start(
+            request_id,
+            target.worker_id,
+            started_at=request_started_at,
+        )
         admission: InferenceAdmission | None = None
         try:
             admission = proxy.admit()
             chat_request = await _read_chat_request(request)
             if chat_request.stream:
-                stream = _safe_stream(proxy, chat_request, admission)
+                stream = _safe_stream(proxy, chat_request, admission, span)
                 chat_request = None
                 admission = None
                 first_event = await anext(stream)
@@ -226,35 +236,50 @@ def create_llm_gateway_app(
                     },
                 )
             else:
-                operation = proxy.complete_admitted(chat_request)
+                operation = proxy.complete_admitted(chat_request, span)
                 chat_request = None
                 result = await operation
+        except asyncio.CancelledError:
+            span.cancel()
+            raise asyncio.CancelledError from None
         except LlmRequestTooLargeError:
+            span.fail(LogErrorClass.LLM, "llm.request_too_large")
             return _error_response(413, "invalid_request_error", "request_too_large", request_id)
         except LlmRequestError:
+            span.fail(LogErrorClass.LLM, "llm.invalid_request")
             return _error_response(400, "invalid_request_error", "invalid_request", request_id)
         except InferenceOverloadedError:
+            span.fail(LogErrorClass.LLM, "llm.inference_overloaded")
             return _error_response(429, "overload_error", "inference_overloaded", request_id)
         except (InferenceLeaseAcquireError, InferenceLeaseRenewalError):
+            span.fail(LogErrorClass.LLM, "llm.lease_unavailable")
             return _error_response(503, "service_error", "lease_unavailable", request_id)
         except InferenceLeaseReleaseError:
+            span.fail(LogErrorClass.LLM, "llm.lease_release_failed")
             return _error_response(503, "service_error", "lease_release_failed", request_id)
         except LlmReadinessError:
+            span.fail(LogErrorClass.READINESS, "llm.worker_unavailable")
             return _error_response(503, "service_error", "worker_unavailable", request_id)
         except LlmUpstreamTimeoutError:
+            span.fail(LogErrorClass.TIMEOUT, "llm.upstream_timeout")
             return _error_response(504, "timeout_error", "upstream_timeout", request_id)
         except LlmUpstreamProtocolError:
+            span.fail(LogErrorClass.LLM, "llm.invalid_upstream_response")
             return _error_response(502, "upstream_error", "invalid_upstream_response", request_id)
         except LlmUpstreamError:
+            span.fail(LogErrorClass.LLM, "llm.upstream_unavailable")
             return _error_response(502, "upstream_error", "upstream_unavailable", request_id)
         except LlmPathError:
+            span.fail(LogErrorClass.LLM, "llm.request_failed")
             return _error_response(500, "server_error", "request_failed", request_id)
         except Exception:
+            span.fail(LogErrorClass.LLM, "llm.unexpected_failure")
             return _error_response(500, "server_error", "request_failed", request_id)
         finally:
             if admission is not None:
                 admission.close()
 
+        span.succeed()
         return JSONResponse(
             result.model_dump(mode="json", exclude_none=True),
             status_code=200,
@@ -268,10 +293,12 @@ async def _safe_stream(
     proxy: LlmProxyService,
     request: ChatCompletionRequest,
     admission: InferenceAdmission,
+    telemetry: LlmRequestSpan,
 ) -> AsyncIterator[bytes]:
     async with admission:
-        stream = proxy.stream_admitted(request, admission)
+        stream = proxy.stream_admitted(request, admission, telemetry)
         sent_event = False
+        cancelled = False
         try:
             try:
                 async for event in stream:
@@ -279,17 +306,32 @@ async def _safe_stream(
                     yield event
             except asyncio.CancelledError:
                 request = None  # type: ignore[assignment]
+                cancelled = True
                 raise asyncio.CancelledError from None
-            except Exception:
+            except GeneratorExit:
                 request = None  # type: ignore[assignment]
+                cancelled = True
+                raise
+            except Exception as error:
+                request = None  # type: ignore[assignment]
+                error_class, error_code = _stream_error_category(error)
+                telemetry.fail(error_class, error_code)
                 if not sent_event:
                     raise
                 yield _STREAM_ERROR_EVENT
                 return
             request = None  # type: ignore[assignment]
+            telemetry.succeed()
             yield _STREAM_DONE_EVENT
         finally:
-            await stream.aclose()
+            try:
+                await stream.aclose()
+            except Exception:
+                telemetry.fail(LogErrorClass.LLM, "llm.cleanup_failed")
+                raise
+            finally:
+                if cancelled:
+                    telemetry.cancel()
 
 
 async def _prepend_event(
@@ -304,6 +346,22 @@ async def _prepend_event(
         close = getattr(stream, "aclose", None)
         if close is not None:
             await close()
+
+
+def _stream_error_category(error: Exception) -> tuple[LogErrorClass, str]:
+    if isinstance(error, (InferenceLeaseAcquireError, InferenceLeaseRenewalError)):
+        return LogErrorClass.LLM, "llm.lease_unavailable"
+    if isinstance(error, InferenceLeaseReleaseError):
+        return LogErrorClass.LLM, "llm.lease_release_failed"
+    if isinstance(error, LlmReadinessError):
+        return LogErrorClass.READINESS, "llm.worker_unavailable"
+    if isinstance(error, LlmUpstreamTimeoutError):
+        return LogErrorClass.TIMEOUT, "llm.upstream_timeout"
+    if isinstance(error, LlmUpstreamProtocolError):
+        return LogErrorClass.LLM, "llm.invalid_upstream_response"
+    if isinstance(error, LlmUpstreamError):
+        return LogErrorClass.LLM, "llm.upstream_unavailable"
+    return LogErrorClass.LLM, "llm.request_failed"
 
 
 def _authenticate_inference(

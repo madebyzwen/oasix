@@ -14,12 +14,16 @@ from oasix.llm.errors import (
 )
 from oasix.llm.leases import InferenceLeaseRegistry, InferenceLeaseSession
 from oasix.llm.models import ChatCompletionRequest, ChatCompletionResponse
+from oasix.llm.telemetry import LlmRequestSpan
 from oasix.worker.contracts import ServiceId
 from oasix.worker.errors import WorkerInteractionError
+from oasix.worker.orchestration import WorkerReadinessTiming
 
 
 class ReadinessController(Protocol):
-    async def ensure_ready(self, service_ids: tuple[ServiceId, ...]) -> None: ...
+    async def ensure_ready(
+        self, service_ids: tuple[ServiceId, ...]
+    ) -> WorkerReadinessTiming | None: ...
 
 
 class NonStreamingUpstream(Protocol):
@@ -111,23 +115,31 @@ class LlmProxyService:
         self._readiness = readiness
         self._upstream = upstream
 
-    async def complete(self, request: ChatCompletionRequest) -> ChatCompletionResponse:
+    async def complete(
+        self,
+        request: ChatCompletionRequest,
+        telemetry: LlmRequestSpan | None = None,
+    ) -> ChatCompletionResponse:
         """Admit and run one request, replacing content-retaining tracebacks."""
 
         async with self.admit():
-            return await self.complete_admitted(request)
+            return await self.complete_admitted(request, telemetry)
 
     def admit(self) -> InferenceAdmission:
         """Reserve capacity immediately, without introducing a waiting queue."""
 
         return self._gate.acquire()
 
-    async def complete_admitted(self, request: ChatCompletionRequest) -> ChatCompletionResponse:
+    async def complete_admitted(
+        self,
+        request: ChatCompletionRequest,
+        telemetry: LlmRequestSpan | None = None,
+    ) -> ChatCompletionResponse:
         """Run an already-admitted request and replace sensitive tracebacks."""
 
         error_type: type[LlmPathError] | None = None
         try:
-            return await self._complete_admitted(request)
+            return await self._complete_admitted(request, telemetry)
         except asyncio.CancelledError:
             request = None  # type: ignore[assignment]
             raise asyncio.CancelledError from None
@@ -142,23 +154,34 @@ class LlmProxyService:
             raise AssertionError("LLM path error mapping produced no category")
         raise error_type from None
 
-    async def _complete_admitted(self, request: ChatCompletionRequest) -> ChatCompletionResponse:
+    async def _complete_admitted(
+        self,
+        request: ChatCompletionRequest,
+        telemetry: LlmRequestSpan | None,
+    ) -> ChatCompletionResponse:
         async with InferenceLeaseSession(
             self._lease_registry,
             self._worker_id,
             self._lease_ttl,
             self._heartbeat_interval,
         ) as lease:
-            await self._readiness.ensure_ready((self._service_id,))
+            if telemetry is not None:
+                telemetry.record_lease(lease.lease_id)
+            timing = await self._readiness.ensure_ready((self._service_id,))
+            if telemetry is not None:
+                telemetry.record_readiness(timing)
             lease.ensure_healthy()
             response = await self._upstream.complete(request)
             lease.ensure_healthy()
+            if telemetry is not None:
+                telemetry.record_usage(response.usage)
             return response
 
     async def stream_admitted(
         self,
         request: ChatCompletionRequest,
         admission: InferenceAdmission,
+        telemetry: LlmRequestSpan | None = None,
     ) -> AsyncIterator[bytes]:
         """Stream one admitted request while owning its persistent lease."""
 
@@ -173,12 +196,18 @@ class LlmProxyService:
                 self._lease_ttl,
                 self._heartbeat_interval,
             ) as lease:
-                await self._readiness.ensure_ready((self._service_id,))
+                if telemetry is not None:
+                    telemetry.record_lease(lease.lease_id)
+                timing = await self._readiness.ensure_ready((self._service_id,))
+                if telemetry is not None:
+                    telemetry.record_readiness(timing)
                 lease.ensure_healthy()
                 upstream_stream = self._upstream.stream(request)
                 try:
                     async for event in upstream_stream:
                         lease.ensure_healthy()
+                        if telemetry is not None:
+                            telemetry.record_first_token()
                         yield event
                 finally:
                     close = getattr(upstream_stream, "aclose", None)

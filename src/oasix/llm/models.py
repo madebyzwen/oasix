@@ -20,6 +20,7 @@ from pydantic import (
 type ModelIdentifier = Annotated[StrictStr, StringConstraints(min_length=1, max_length=255)]
 type MessageContent = Annotated[StrictStr, StringConstraints(max_length=262_144)]
 type FinishReason = Annotated[StrictStr, StringConstraints(min_length=1, max_length=64)]
+_MAX_TOKEN_COUNT = (2**63) - 1
 
 
 class _ApiModel(BaseModel):
@@ -66,9 +67,9 @@ class ChatCompletionChoice(_ApiModel):
 
 
 class TokenUsage(_ApiModel):
-    prompt_tokens: Annotated[StrictInt, Field(ge=0)]
-    completion_tokens: Annotated[StrictInt, Field(ge=0)]
-    total_tokens: Annotated[StrictInt, Field(ge=0)]
+    prompt_tokens: Annotated[StrictInt, Field(ge=0, le=_MAX_TOKEN_COUNT)]
+    completion_tokens: Annotated[StrictInt, Field(ge=0, le=_MAX_TOKEN_COUNT)]
+    total_tokens: Annotated[StrictInt, Field(ge=0, le=_MAX_TOKEN_COUNT)]
 
     @model_validator(mode="after")
     def validate_total(self) -> TokenUsage:

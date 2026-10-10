@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from io import StringIO
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +29,7 @@ from oasix.llm import (
     LlmProxyService,
     create_llm_gateway_app,
 )
+from oasix.logging import StructuredLogger, create_structured_logger
 from oasix.persistence import Lease, PersistenceDatabase
 from oasix.worker import ServiceId
 
@@ -46,7 +48,7 @@ def _loaded(
     disable_wake: bool = True,
 ) -> LoadedConfiguration:
     if disable_wake:
-        data["workers"]["worker-primary"]["power"]["wake"] = {"method": "none"}
+        data["workers"][data["active_worker"]]["power"]["wake"] = {"method": "none"}
     data["policies"]["retry"]["wake"].update(
         max_attempts=1,
         initial_delay_seconds=0.0,
@@ -125,6 +127,7 @@ def _app(
     *,
     readiness_transport: httpx.AsyncBaseTransport | None = None,
     wake_sender: Any = None,
+    structured_logger: StructuredLogger | None = None,
 ) -> Any:
     return create_llm_gateway_app(
         loaded.runtime,
@@ -133,6 +136,7 @@ def _app(
         readiness_transport=readiness_transport or _readiness_transport(),
         upstream_transport=upstream_transport,
         wake_sender=wake_sender,
+        structured_logger=structured_logger,
     )
 
 
@@ -170,6 +174,84 @@ def test_authenticated_request_uses_provider_credential_and_releases_lease(
         assert leases[0].purpose == "inference"
         assert leases[0].released_at is not None
         assert leases[0].release_reason == "completed"
+
+
+def test_success_telemetry_correlates_request_worker_lease_and_available_usage(
+    gateway_config_data: dict[str, Any],
+    write_config: Any,
+    secret_directory: Path,
+    migrated_database: PersistenceDatabase,
+) -> None:
+    loaded = _loaded(gateway_config_data, write_config, secret_directory)
+    output = StringIO()
+    logger = create_structured_logger("llm_gateway", stream=output)
+    response = asyncio.run(
+        _request_app(
+            _app(
+                loaded,
+                migrated_database,
+                httpx.MockTransport(lambda _request: httpx.Response(200, json=_response_payload())),
+                structured_logger=logger,
+            ),
+            headers={"Authorization": f"Bearer {CLIENT_KEY}"},
+        )
+    )
+
+    payload = json.loads(output.getvalue())
+    with migrated_database.session() as session:
+        lease = session.scalar(select(Lease))
+        assert lease is not None
+        lease_id = lease.lease_id
+
+    assert response.status_code == 200
+    assert payload["event_code"] == "llm.request_completed"
+    assert payload["completion_status"] == "succeeded"
+    assert payload["request_id"] == response.headers["x-request-id"]
+    assert payload["worker_id"] == "worker-primary"
+    assert payload["lease_id"] == lease_id
+    assert payload["prompt_tokens"] == 1
+    assert payload["completion_tokens"] == 2
+    assert payload["total_tokens"] == 3
+    assert payload["request_duration_ms"] >= 0
+    assert payload["readiness_latency_ms"] >= 0
+    assert "wake_latency_ms" not in payload
+    assert "time_to_first_token_ms" not in payload
+
+
+def test_active_worker_swap_is_configuration_only_and_is_reflected_in_telemetry(
+    gateway_config_data: dict[str, Any],
+    write_config: Any,
+    secret_directory: Path,
+    migrated_database: PersistenceDatabase,
+) -> None:
+    profile = gateway_config_data["workers"].pop("worker-primary")
+    gateway_config_data["workers"]["worker-secondary"] = profile
+    gateway_config_data["active_worker"] = "worker-secondary"
+    loaded = _loaded(gateway_config_data, write_config, secret_directory)
+    output = StringIO()
+
+    response = asyncio.run(
+        _request_app(
+            _app(
+                loaded,
+                migrated_database,
+                httpx.MockTransport(lambda _request: httpx.Response(200, json=_response_payload())),
+                structured_logger=create_structured_logger(
+                    "llm_gateway",
+                    stream=output,
+                ),
+            ),
+            headers={"Authorization": f"Bearer {CLIENT_KEY}"},
+        )
+    )
+
+    payload = json.loads(output.getvalue())
+    with migrated_database.session() as session:
+        lease = session.scalar(select(Lease))
+        assert lease is not None
+        assert lease.worker_id == "worker-secondary"
+    assert response.status_code == 200
+    assert payload["worker_id"] == "worker-secondary"
 
 
 @pytest.mark.parametrize(
@@ -387,6 +469,60 @@ def test_readiness_failure_releases_lease_without_upstream_call(
         assert lease.release_reason == "cancelled"
 
 
+def test_cancellation_during_readiness_releases_lease_and_emits_cancelled_telemetry(
+    gateway_config_data: dict[str, Any],
+    write_config: Any,
+    secret_directory: Path,
+    migrated_database: PersistenceDatabase,
+) -> None:
+    loaded = _loaded(gateway_config_data, write_config, secret_directory)
+    readiness_started = asyncio.Event()
+    output = StringIO()
+
+    async def readiness(_request: httpx.Request) -> httpx.Response:
+        readiness_started.set()
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    async def run() -> None:
+        app = _app(
+            loaded,
+            migrated_database,
+            httpx.MockTransport(lambda _request: pytest.fail("must not call upstream")),
+            readiness_transport=httpx.MockTransport(readiness),
+            structured_logger=create_structured_logger("llm_gateway", stream=output),
+        )
+        try:
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app),
+                base_url="http://control-plane.example.invalid",
+            ) as client:
+                request = asyncio.create_task(
+                    client.post(
+                        "/v1/chat/completions",
+                        headers={"Authorization": f"Bearer {CLIENT_KEY}"},
+                        json=_request_payload(),
+                    )
+                )
+                await readiness_started.wait()
+                request.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await request
+        finally:
+            await app.state.oasix_resources.aclose()
+
+    asyncio.run(run())
+
+    event = json.loads(output.getvalue())
+    assert event["event_code"] == "llm.request_cancelled"
+    assert event["completion_status"] == "cancelled"
+    with migrated_database.session() as session:
+        lease = session.scalar(select(Lease))
+        assert lease is not None
+        assert lease.released_at is not None
+        assert lease.release_reason == "cancelled"
+
+
 def test_wake_failure_is_bounded_and_releases_lease(
     gateway_config_data: dict[str, Any],
     write_config: Any,
@@ -514,6 +650,35 @@ def test_rejects_unbounded_encoded_or_ambiguous_upstream_responses(
                 loaded,
                 migrated_database,
                 httpx.MockTransport(upstream),
+            ),
+            headers={"Authorization": f"Bearer {CLIENT_KEY}"},
+        )
+    )
+
+    assert response.status_code == 502
+    assert response.json()["error"]["code"] == "invalid_upstream_response"
+
+
+def test_rejects_upstream_token_metrics_outside_logging_boundary(
+    gateway_config_data: dict[str, Any],
+    write_config: Any,
+    secret_directory: Path,
+    migrated_database: PersistenceDatabase,
+) -> None:
+    loaded = _loaded(gateway_config_data, write_config, secret_directory)
+    payload = _response_payload()
+    payload["usage"] = {
+        "prompt_tokens": 2**63,
+        "completion_tokens": 0,
+        "total_tokens": 2**63,
+    }
+
+    response = asyncio.run(
+        _request_app(
+            _app(
+                loaded,
+                migrated_database,
+                httpx.MockTransport(lambda _request: httpx.Response(200, json=payload)),
             ),
             headers={"Authorization": f"Bearer {CLIENT_KEY}"},
         )
@@ -747,6 +912,7 @@ def test_gateway_error_does_not_expose_prompt_or_provider_secret(
         encoding="utf-8",
     )
     loaded = _loaded(gateway_config_data, write_config, secret_directory)
+    telemetry_output = StringIO()
 
     def upstream(request: httpx.Request) -> httpx.Response:
         assert request.headers["authorization"] == f"Bearer {SENTINEL_PROVIDER_SECRET}"
@@ -758,7 +924,15 @@ def test_gateway_error_does_not_expose_prompt_or_provider_secret(
 
     response = asyncio.run(
         _request_app(
-            _app(loaded, migrated_database, httpx.MockTransport(upstream)),
+            _app(
+                loaded,
+                migrated_database,
+                httpx.MockTransport(upstream),
+                structured_logger=create_structured_logger(
+                    "llm_gateway",
+                    stream=telemetry_output,
+                ),
+            ),
             headers={"Authorization": f"Bearer {CLIENT_KEY}"},
             payload=_request_payload(content=SENTINEL_PROMPT),
         )
@@ -769,3 +943,9 @@ def test_gateway_error_does_not_expose_prompt_or_provider_secret(
     assert SENTINEL_PROVIDER_SECRET not in response.text
     assert SENTINEL_PROMPT not in caplog.text
     assert SENTINEL_PROVIDER_SECRET not in caplog.text
+    assert SENTINEL_PROMPT not in telemetry_output.getvalue()
+    assert SENTINEL_PROVIDER_SECRET not in telemetry_output.getvalue()
+    event = json.loads(telemetry_output.getvalue())
+    assert event["completion_status"] == "failed"
+    assert event["error_class"] == "LLM"
+    assert event["error_code"] == "llm.invalid_upstream_response"

@@ -100,7 +100,7 @@ Betroffene Implementierung:
 | B.3.1-Konfiguration und LLM-Pfad | lokal, macOS, Python 3.12 | bestanden | `tests/test_llm_configuration.py`, `tests/test_llm_proxy.py` |
 | Vollständige pytest-Suite | lokal, macOS, Python 3.12 | 329 bestanden | B.3.1-Arbeitsstand vor Commit |
 | Ruff, Paket-, Import-, Link- und Diff-Prüfung | lokal | bestanden | B.3.1-Arbeitsstand vor Commit |
-| Linux-CI | GitHub Actions, Ubuntu, Python 3.12 | nach Push ausstehend | [PR #6](https://github.com/madebyzwen/oasix/pull/6) |
+| Linux-CI | GitHub Actions, Ubuntu, Python 3.12 | bestanden | [Lauf 38007072518](https://github.com/madebyzwen/oasix/actions/runs/38007072518) |
 
 Die Tests verwenden kontrollierte HTTP-Transporte und temporäre SQLite-
 Datenbanken. Sie prüfen Authentifizierung und Rechte, Überlast vor Body-Parsing,
@@ -122,14 +122,14 @@ werden keine produktiven Hosts oder Secret-Dateien verwendet.
 - Reale DNS-, TLS-, Wake-on-LAN- und Providerkompatibilität benötigen einen
   Deployment-Smoke-Test. Automatische Redirects und Umgebungs-Proxies bleiben
   absichtlich deaktiviert.
-- Operative Telemetrie wird erst in B.5 integriert. B.3.1 loggt weder Requests
-  noch Antworten.
+- Operative Telemetrie wurde aufbauend in B.5 integriert. B.3.1 selbst loggt
+  weiterhin weder Request- noch Antwortinhalte.
 
 ## 8. Abnahmestatus
 
 B.3.1 ist implementiert und lokal geprüft, aber bis zum unabhängigen
-GitHub-Code-Review nicht freigegeben. B.4 und B.5 sind zu diesem Stand nicht
-implementiert.
+GitHub-Code-Review nicht freigegeben. B.4 und B.5 sind inzwischen
+implementiert und warten ebenfalls auf unabhängige Review-Abnahme.
 
 ## 9. GitHub-Referenzen
 
@@ -138,4 +138,6 @@ implementiert.
   [PR #6](https://github.com/madebyzwen/oasix/pull/6)
 - Pull Request: [PR #6](https://github.com/madebyzwen/oasix/pull/6), offen und
   nicht gemergt
-- Linux-CI: nach Push ausstehend
+- Implementierungs-Commit:
+  [`e5247b1`](https://github.com/madebyzwen/oasix/commit/e5247b17fc5c869be8928a224f992ff86fa806e0)
+- Linux-CI: [Lauf 38007072518](https://github.com/madebyzwen/oasix/actions/runs/38007072518), bestanden

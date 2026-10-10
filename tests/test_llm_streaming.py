@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import uuid
+from io import StringIO
 from pathlib import Path
 from typing import Any
 
@@ -21,9 +23,12 @@ from oasix.llm import (
     InferenceLeaseRenewalError,
     InferenceOverloadedError,
     LlmProxyService,
+    LlmRequestSpan,
+    LlmTelemetry,
     create_llm_gateway_app,
 )
 from oasix.llm.gateway import _ManagedStreamingResponse, _safe_stream
+from oasix.logging import StructuredLogger, create_structured_logger
 from oasix.persistence import Lease, PersistenceDatabase
 from oasix.worker import ServiceId
 
@@ -37,8 +42,10 @@ def _loaded(
     *,
     heartbeat_interval: float = 2.0,
     request_timeout: int = 30,
+    disable_wake: bool = True,
 ) -> LoadedConfiguration:
-    data["workers"]["worker-primary"]["power"]["wake"] = {"method": "none"}
+    if disable_wake:
+        data["workers"][data["active_worker"]]["power"]["wake"] = {"method": "none"}
     data["policies"]["inference"].update(
         heartbeat_interval_seconds=heartbeat_interval,
         request_timeout_seconds=request_timeout,
@@ -128,13 +135,20 @@ def _app(
     loaded: LoadedConfiguration,
     database: PersistenceDatabase,
     stream: httpx.AsyncByteStream,
+    *,
+    readiness_transport: httpx.AsyncBaseTransport | None = None,
+    wake_sender: Any = None,
+    structured_logger: StructuredLogger | None = None,
 ) -> Any:
     return create_llm_gateway_app(
         loaded.runtime,
         loaded.secrets,
         database,
-        readiness_transport=httpx.MockTransport(lambda _request: httpx.Response(200)),
+        readiness_transport=readiness_transport
+        or httpx.MockTransport(lambda _request: httpx.Response(200)),
         upstream_transport=httpx.MockTransport(lambda _request: _stream_response(stream)),
+        wake_sender=wake_sender,
+        structured_logger=structured_logger,
     )
 
 
@@ -180,6 +194,71 @@ def test_gateway_streams_multiple_validated_sse_events_and_done(
         assert lease is not None
         assert lease.released_at is not None
         assert lease.release_reason == "completed"
+
+
+def test_full_wake_readiness_streaming_path_emits_safe_correlated_telemetry(
+    gateway_config_data: dict[str, Any],
+    write_config: Any,
+    secret_directory: Path,
+    migrated_database: PersistenceDatabase,
+) -> None:
+    gateway_config_data["policies"]["retry"]["wake"].update(
+        max_attempts=1,
+        initial_delay_seconds=0.0,
+        max_delay_seconds=0.0,
+    )
+    loaded = _loaded(
+        gateway_config_data,
+        write_config,
+        secret_directory,
+        disable_wake=False,
+    )
+    readiness_statuses = iter((503, 200))
+    wake_deliveries: list[tuple[bytes, str, int]] = []
+    output = StringIO()
+    stream = _AsyncChunks(
+        [
+            _sse(_chunk_payload(role="assistant")),
+            _sse(_chunk_payload("complete")),
+            b"data: [DONE]\n\n",
+        ]
+    )
+
+    async def wake_sender(packet: bytes, host: str, port: int) -> None:
+        wake_deliveries.append((packet, host, port))
+
+    app = _app(
+        loaded,
+        migrated_database,
+        stream,
+        readiness_transport=httpx.MockTransport(
+            lambda _request: httpx.Response(next(readiness_statuses))
+        ),
+        wake_sender=wake_sender,
+        structured_logger=create_structured_logger("llm_gateway", stream=output),
+    )
+    response = asyncio.run(_post_stream(app))
+
+    event = json.loads(output.getvalue())
+    with migrated_database.session() as session:
+        lease = session.scalar(select(Lease))
+        assert lease is not None
+        assert lease.released_at is not None
+    assert response.status_code == 200
+    assert response.content.endswith(b"data: [DONE]\n\n")
+    assert len(wake_deliveries) == 1
+    assert event["event_code"] == "llm.request_completed"
+    assert event["completion_status"] == "succeeded"
+    assert event["request_id"] == response.headers["x-request-id"]
+    assert event["worker_id"] == "worker-primary"
+    assert event["lease_id"] == lease.lease_id
+    assert event["request_duration_ms"] >= 0
+    assert event["readiness_latency_ms"] >= 0
+    assert event["wake_latency_ms"] >= 0
+    assert event["time_to_first_token_ms"] >= 0
+    assert "prompt_tokens" not in event
+    assert "completion_tokens" not in event
+    assert "total_tokens" not in event
 
 
 def test_upstream_events_are_consumed_incrementally(
@@ -372,12 +451,20 @@ def _chat_request() -> ChatCompletionRequest:
     return ChatCompletionRequest.model_validate(_request_payload())
 
 
+def _telemetry_span() -> LlmRequestSpan:
+    telemetry = LlmTelemetry(create_structured_logger("llm_gateway", stream=StringIO()))
+    return telemetry.start(str(uuid.uuid4()), "worker-primary")
+
+
 def test_client_cancellation_closes_upstream_releases_lease_and_admission() -> None:
-    async def run() -> tuple[list[str], bool]:
+    async def run() -> tuple[list[str], bool, str]:
         registry = _FakeLeaseRegistry()
         upstream = _BlockingStreamUpstream()
         service = _service(registry, upstream)
-        body = _safe_stream(service, _chat_request(), service.admit())
+        output = StringIO()
+        telemetry = LlmTelemetry(create_structured_logger("llm_gateway", stream=output))
+        span = telemetry.start(str(uuid.uuid4()), "worker-primary")
+        body = _safe_stream(service, _chat_request(), service.admit(), span)
         response = _ManagedStreamingResponse(body, media_type="text/event-stream")
 
         async def receive() -> dict[str, str]:
@@ -392,11 +479,14 @@ def test_client_cancellation_closes_upstream_releases_lease_and_admission() -> N
             await response(scope, receive, send)  # type: ignore[arg-type]
         replacement = service.admit()
         replacement.close()
-        return registry.events, upstream.closed
+        return registry.events, upstream.closed, output.getvalue()
 
-    events, closed = asyncio.run(run())
+    events, closed, telemetry_output = asyncio.run(run())
     assert events == ["acquire", "release"]
     assert closed
+    telemetry_event = json.loads(telemetry_output)
+    assert telemetry_event["event_code"] == "llm.request_cancelled"
+    assert telemetry_event["completion_status"] == "cancelled"
 
 
 def test_heartbeat_failure_stops_stream_and_never_reports_done() -> None:
@@ -405,7 +495,15 @@ def test_heartbeat_failure_stops_stream_and_never_reports_done() -> None:
         upstream = _BlockingStreamUpstream()
         service = _service(registry, upstream, heartbeat_interval=0.01)
         body = b"".join(
-            [event async for event in _safe_stream(service, _chat_request(), service.admit())]
+            [
+                event
+                async for event in _safe_stream(
+                    service,
+                    _chat_request(),
+                    service.admit(),
+                    _telemetry_span(),
+                )
+            ]
         )
         return body, registry.events, upstream.closed
 
@@ -422,7 +520,15 @@ def test_release_failure_replaces_done_with_stream_error() -> None:
         upstream = _BlockingStreamUpstream(finish=True)
         service = _service(registry, upstream)
         body = b"".join(
-            [event async for event in _safe_stream(service, _chat_request(), service.admit())]
+            [
+                event
+                async for event in _safe_stream(
+                    service,
+                    _chat_request(),
+                    service.admit(),
+                    _telemetry_span(),
+                )
+            ]
         )
         return body, registry.events
 
@@ -439,7 +545,7 @@ def test_concurrency_slot_remains_occupied_for_entire_stream() -> None:
         upstream = _BlockingStreamUpstream()
         service = _service(registry, upstream)
         admission = service.admit()
-        stream = _safe_stream(service, _chat_request(), admission)
+        stream = _safe_stream(service, _chat_request(), admission, _telemetry_span())
 
         async def consume() -> None:
             try:

@@ -75,8 +75,8 @@ Nachweise für Authentifizierung und Proxy stehen in
 ## 8. Abnahmestatus
 
 Der hier dokumentierte Blocker ist aufgelöst. Der aktuelle Implementierungs-
-und Abnahmestatus steht in [Phase B.3.1](B3-llm-proxy.md). B.4 und B.5 sind zu
-diesem Stand nicht implementiert.
+und Abnahmestatus steht in [Phase B.3.1](B3-llm-proxy.md). B.4 und B.5 sind
+inzwischen ebenfalls implementiert und warten auf unabhängige Review-Abnahme.
 
 ## 9. GitHub-Referenzen
 

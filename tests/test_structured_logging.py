@@ -17,6 +17,7 @@ from oasix.logging import (
     REQUIRED_LOG_FIELDS,
     EventDefinition,
     JsonLinesFormatter,
+    LogCompletionStatus,
     LogErrorClass,
     LogValidationError,
     StructuredLogger,
@@ -115,6 +116,62 @@ def test_emits_only_validated_correlation_and_error_fields() -> None:
         "error_class": "TIMEOUT",
         "error_code": "worker.readiness_timeout",
     }
+
+
+def test_emits_only_typed_allowlisted_operational_metrics() -> None:
+    _, payload = _logger_output(
+        fields={
+            "request_duration_ms": 101,
+            "wake_latency_ms": 81,
+            "readiness_latency_ms": 99,
+            "time_to_first_token_ms": 100,
+            "prompt_tokens": 3,
+            "completion_tokens": 5,
+            "total_tokens": 8,
+            "completion_status": LogCompletionStatus.SUCCEEDED,
+        }
+    )
+
+    assert payload["request_duration_ms"] == 101
+    assert payload["wake_latency_ms"] == 81
+    assert payload["readiness_latency_ms"] == 99
+    assert payload["time_to_first_token_ms"] == 100
+    assert payload["prompt_tokens"] == 3
+    assert payload["completion_tokens"] == 5
+    assert payload["total_tokens"] == 8
+    assert payload["completion_status"] == "succeeded"
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value"),
+    [
+        ("request_duration_ms", -1),
+        ("wake_latency_ms", True),
+        ("readiness_latency_ms", 1.5),
+        ("time_to_first_token_ms", "1"),
+        ("prompt_tokens", -1),
+        ("completion_tokens", object()),
+        ("total_tokens", 2**63),
+        ("completion_status", "succeeded"),
+    ],
+)
+def test_rejects_untyped_or_out_of_range_operational_metrics(
+    field_name: str,
+    value: object,
+) -> None:
+    stream = StringIO()
+    logger = create_structured_logger("control_plane", stream=stream)
+
+    with pytest.raises(LogValidationError) as captured:
+        logger.emit(
+            logging.INFO,
+            _TEST_EVENT,
+            {field_name: value, "request_id": "request-1"},
+        )
+
+    assert stream.getvalue() == ""
+    assert field_name not in str(captured.value)
+    assert field_name not in repr(captured.value)
 
 
 def test_missing_optional_fields_are_omitted_instead_of_invented() -> None:

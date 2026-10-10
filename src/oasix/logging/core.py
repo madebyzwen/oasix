@@ -34,6 +34,14 @@ _OPTIONAL_FIELD_ORDER = (
     "lease_id",
     "error_class",
     "error_code",
+    "request_duration_ms",
+    "wake_latency_ms",
+    "readiness_latency_ms",
+    "time_to_first_token_ms",
+    "prompt_tokens",
+    "completion_tokens",
+    "total_tokens",
+    "completion_status",
 )
 
 REQUIRED_LOG_FIELDS = frozenset({"timestamp", "level", "component", "event_code", "message"})
@@ -45,6 +53,7 @@ _MAX_EVENT_CODE_LENGTH = 127
 _MAX_DESCRIPTION_BYTES = 512
 _MAX_REQUEST_ID_LENGTH = 128
 _MAX_ERROR_CODE_LENGTH = 128
+_MAX_METRIC_VALUE = (2**63) - 1
 
 
 class LogValidationError(ValueError):
@@ -64,6 +73,14 @@ class LogErrorClass(StrEnum):
     AGENT = "AGENT"
     TOOL = "TOOL"
     TIMEOUT = "TIMEOUT"
+
+
+class LogCompletionStatus(StrEnum):
+    """Closed completion outcomes for operational request telemetry."""
+
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 @dataclass(frozen=True, slots=True, repr=False, init=False)
@@ -113,7 +130,7 @@ class _PreparedEvent:
     component: str
     code: str
     description: str
-    fields: tuple[tuple[str, str], ...]
+    fields: tuple[tuple[str, str | int], ...]
 
 
 class JsonLinesFormatter(stdlib_logging.Formatter):
@@ -122,7 +139,7 @@ class JsonLinesFormatter(stdlib_logging.Formatter):
     def format(self, record: stdlib_logging.LogRecord) -> str:
         prepared = getattr(record, _LOG_RECORD_ATTRIBUTE, None)
         if type(prepared) is not _PreparedEvent:
-            payload: dict[str, str] = {
+            payload: dict[str, str | int] = {
                 "timestamp": _utc_timestamp(record.created),
                 "level": "ERROR",
                 "component": "logging",
@@ -258,7 +275,7 @@ def _prepare_event(
     )
 
 
-def _prepare_fields(fields: Mapping[str, object] | None) -> tuple[tuple[str, str], ...]:
+def _prepare_fields(fields: Mapping[str, object] | None) -> tuple[tuple[str, str | int], ...]:
     if fields is None:
         return ()
     if type(fields) is not dict:
@@ -266,7 +283,7 @@ def _prepare_fields(fields: Mapping[str, object] | None) -> tuple[tuple[str, str
     if any(type(name) is not str or name not in OPTIONAL_LOG_FIELDS for name in fields):
         raise LogValidationError from None
 
-    prepared: dict[str, str] = {}
+    prepared: dict[str, str | int] = {}
     for name in _OPTIONAL_FIELD_ORDER:
         value = fields.get(name)
         if value is None:
@@ -275,11 +292,27 @@ def _prepare_fields(fields: Mapping[str, object] | None) -> tuple[tuple[str, str
     return tuple(prepared.items())
 
 
-def _validate_field(name: str, value: object) -> str:
+def _validate_field(name: str, value: object) -> str | int:
     if name == "error_class":
         if type(value) is not LogErrorClass:
             raise LogValidationError from None
         return value.value
+    if name == "completion_status":
+        if type(value) is not LogCompletionStatus:
+            raise LogValidationError from None
+        return value.value
+    if name in {
+        "request_duration_ms",
+        "wake_latency_ms",
+        "readiness_latency_ms",
+        "time_to_first_token_ms",
+        "prompt_tokens",
+        "completion_tokens",
+        "total_tokens",
+    }:
+        if type(value) is not int or not 0 <= value <= _MAX_METRIC_VALUE:
+            raise LogValidationError from None
+        return value
     if type(value) is not str:
         raise LogValidationError from None
     if name in {"job_id", "attempt_id", "lease_id"}:

@@ -88,7 +88,7 @@ dokumentiert.
 | B.3/B.4-fokussierte Suite | lokal, macOS, Python 3.12 | 41 bestanden | B.4-Arbeitsstand vor Commit |
 | Vollständige pytest-Suite | lokal, macOS, Python 3.12 | 340 bestanden | B.4-Arbeitsstand vor Commit |
 | Ruff, Paket-, Import-, Link- und Diff-Prüfung | lokal | bestanden | B.4-Arbeitsstand vor Commit |
-| Linux-CI | GitHub Actions, Ubuntu, Python 3.12 | nach Push ausstehend | [PR #6](https://github.com/madebyzwen/oasix/pull/6) |
+| Linux-CI | GitHub Actions, Ubuntu, Python 3.12 | bestanden | [Lauf 38007804479](https://github.com/madebyzwen/oasix/actions/runs/38007804479) |
 
 Die Tests decken mehrteilige und fragmentierte SSE-Daten, inkrementellen
 Verbrauch, langsame Streams mit Heartbeat, Client-Disconnect, Upstream-Abbruch,
@@ -108,12 +108,13 @@ Streaming-Dauer ab.
   unterstützt.
 - Das prozesslokale Concurrency-Limit und die Single-Process-Annahme aus B.3.1
   bleiben bestehen.
-- Zeit- und Token-Telemetrie folgt erst in B.5.
+- Zeit- und Token-Telemetrie wurde aufbauend in B.5 integriert.
 
 ## 8. Abnahmestatus
 
-B.4 ist implementiert und lokal geprüft, bleibt aber bis zum unabhängigen
-GitHub-Code-Review unfreigegeben. B.5 ist zu diesem Stand nicht implementiert.
+B.4 ist implementiert und lokal sowie unter Linux geprüft, bleibt aber bis zum
+unabhängigen GitHub-Code-Review unfreigegeben. B.5 ist inzwischen ebenfalls
+implementiert und wartet auf unabhängige Review-Abnahme.
 
 ## 9. GitHub-Referenzen
 
@@ -121,4 +122,6 @@ GitHub-Code-Review unfreigegeben. B.5 ist zu diesem Stand nicht implementiert.
   in [PR #6](https://github.com/madebyzwen/oasix/pull/6)
 - Pull Request: [PR #6](https://github.com/madebyzwen/oasix/pull/6), offen und
   nicht gemergt
-- Linux-CI: nach Push ausstehend
+- Implementierungs-Commit:
+  [`607acd2`](https://github.com/madebyzwen/oasix/commit/607acd2551f00fd7bc333effe8f66362d0020b7e)
+- Linux-CI: [Lauf 38007804479](https://github.com/madebyzwen/oasix/actions/runs/38007804479), bestanden

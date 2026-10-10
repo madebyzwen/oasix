@@ -639,3 +639,34 @@ ausdrücklich noch nicht implementierte Entscheidungen.
   AC-10; [Phase B.4](phases/B4-streaming.md),
   [Gateway](../../src/oasix/llm/gateway.py),
   [LLM-Transport](../../src/oasix/llm/transport.py)
+
+## OASIX-DEC-023 – Geschlossene LLM-Request-Telemetrie
+
+- **Status:** In B.5 implementiert; unabhängige Review-Abnahme ausstehend
+- **Kontext:** Der interaktive LLM-Pfad benötigt korrelierbare Wake-,
+  Readiness-, Request-, First-Token- und Token-Metriken, darf aber keine
+  Prompts, Antworten, Credentials, Endpunkte oder beliebige Exceptiondaten in
+  Logs übernehmen. Fehlende Providerwerte dürfen nicht geschätzt werden.
+- **Gewählte Lösung:** Ein pro Anfrage erzeugter `LlmRequestSpan` sammelt nur
+  allowlist-validierte technische IDs, monotone Zeitmarken und nicht negative
+  ganzzahlige Metriken. Service- und Orchestrierungsschichten ergänzen Werte an
+  ihrer jeweiligen Entstehungsstelle. Genau ein statisches terminales Ereignis
+  meldet Erfolg, kontrollierten Fehler oder Cancellation. Technische Fehler
+  werden ausschließlich an der Gateway-Grenze auf geschlossene Klassen und
+  feste Codes abgebildet.
+- **Begründung:** Eine vorgelagerte Typ- und Feldbegrenzung setzt die
+  Sicherheitsgarantie aus OASIX-DEC-016 fort, ohne nachträgliche Secret-
+  Heuristiken. Die monotone Uhr eignet sich für Laufzeiten unabhängig von
+  Zeitsprüngen; nicht vorhandene Streaming-Usage bleibt gemäß OBS-03 leer.
+- **Berücksichtigte Alternativen:** Freie Log-Mappings, Exception-
+  Serialisierung, Payload- oder Chunk-Logging, geschätzte Tokenzahlen,
+  dynamische Metriknamen und eine neue persistente Request-Telemetrietabelle
+  wurden ausgeschlossen.
+- **Konsequenzen und Trade-offs:** Die Allowlist muss für neue stabile
+  Kernmetriken bewusst erweitert werden. Authentifizierungsfehler erzeugen
+  keinen LLM-Requestspan. Persistente Attempt-Telemetrie folgt mit dem späteren
+  Job-Lifecycle; B.5 protokolliert ausschließlich den interaktiven Pfad.
+- **Quellen:** Requirement SEC-03, OBS-01 bis OBS-03 und AC-10;
+  [Phase B.5](phases/B5-telemetry-integration.md),
+  [Telemetrie](../../src/oasix/llm/telemetry.py),
+  [Logging-Grenze](../../src/oasix/logging/core.py)

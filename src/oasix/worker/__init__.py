@@ -19,7 +19,7 @@ from oasix.worker.errors import (
     WorkerTimeoutError,
     WorkerUnavailableError,
 )
-from oasix.worker.orchestration import WorkerReadinessOrchestrator
+from oasix.worker.orchestration import WorkerReadinessOrchestrator, WorkerReadinessTiming
 from oasix.worker.readiness import (
     HttpServiceReadinessAdapter,
     create_http_service_readiness_adapter,
@@ -55,4 +55,5 @@ __all__ = [
     "resolve_active_worker",
     "WakeOnLanController",
     "WorkerReadinessOrchestrator",
+    "WorkerReadinessTiming",
 ]
