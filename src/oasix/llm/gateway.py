@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from collections.abc import AsyncIterator
@@ -9,9 +10,10 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 
 import httpx
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, Request, Response
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import ValidationError
+from starlette.types import Receive, Scope, Send
 
 from oasix.auth import (
     ClientAuthenticationError,
@@ -40,7 +42,11 @@ from oasix.llm.errors import (
 )
 from oasix.llm.leases import PersistentInferenceLeaseRegistry
 from oasix.llm.models import ChatCompletionRequest
-from oasix.llm.service import InferenceConcurrencyGate, LlmProxyService
+from oasix.llm.service import (
+    InferenceAdmission,
+    InferenceConcurrencyGate,
+    LlmProxyService,
+)
 from oasix.llm.transport import HttpLlmUpstream
 from oasix.persistence import PersistenceDatabase, initialize_persistence
 from oasix.worker import (
@@ -54,6 +60,11 @@ from oasix.worker import (
 from oasix.worker.wake import DatagramSender
 
 MAX_CLIENT_REQUEST_BYTES = 1_048_576
+_STREAM_DONE_EVENT = b"data: [DONE]\n\n"
+_STREAM_ERROR_EVENT = (
+    b'data: {"error":{"message":"Stream could not be completed.",'
+    b'"type":"stream_error","code":"stream_failed"}}\n\n'
+)
 
 
 @dataclass(slots=True)
@@ -71,6 +82,18 @@ class _GatewayResources:
             finally:
                 if self.database is not None:
                     self.database.close()
+
+
+class _ManagedStreamingResponse(StreamingResponse):
+    """Always close an async body iterator when ASGI streaming terminates."""
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            close = getattr(self.body_iterator, "aclose", None)
+            if close is not None:
+                await close()
 
 
 def create_configured_llm_gateway_app() -> FastAPI:
@@ -164,7 +187,7 @@ def create_llm_gateway_app(
     application.state.oasix_resources = resources
 
     @application.post("/v1/chat/completions")
-    async def chat_completions(request: Request) -> JSONResponse:
+    async def chat_completions(request: Request) -> Response:
         request_id = str(uuid.uuid4())
         try:
             _authenticate_inference(request, authenticator, authorizer)
@@ -184,11 +207,25 @@ def create_llm_gateway_app(
                 request_id,
             )
 
+        admission: InferenceAdmission | None = None
         try:
-            async with proxy.admission():
-                chat_request = await _read_chat_request(request)
-                if chat_request.stream:
-                    raise LlmRequestError from None
+            admission = proxy.admit()
+            chat_request = await _read_chat_request(request)
+            if chat_request.stream:
+                stream = _safe_stream(proxy, chat_request, admission)
+                chat_request = None
+                admission = None
+                first_event = await anext(stream)
+                return _ManagedStreamingResponse(
+                    _prepend_event(first_event, stream),
+                    status_code=200,
+                    media_type="text/event-stream",
+                    headers={
+                        "cache-control": "no-cache",
+                        "x-request-id": request_id,
+                    },
+                )
+            else:
                 operation = proxy.complete_admitted(chat_request)
                 chat_request = None
                 result = await operation
@@ -214,6 +251,9 @@ def create_llm_gateway_app(
             return _error_response(500, "server_error", "request_failed", request_id)
         except Exception:
             return _error_response(500, "server_error", "request_failed", request_id)
+        finally:
+            if admission is not None:
+                admission.close()
 
         return JSONResponse(
             result.model_dump(mode="json", exclude_none=True),
@@ -222,6 +262,48 @@ def create_llm_gateway_app(
         )
 
     return application
+
+
+async def _safe_stream(
+    proxy: LlmProxyService,
+    request: ChatCompletionRequest,
+    admission: InferenceAdmission,
+) -> AsyncIterator[bytes]:
+    async with admission:
+        stream = proxy.stream_admitted(request, admission)
+        sent_event = False
+        try:
+            try:
+                async for event in stream:
+                    sent_event = True
+                    yield event
+            except asyncio.CancelledError:
+                request = None  # type: ignore[assignment]
+                raise asyncio.CancelledError from None
+            except Exception:
+                request = None  # type: ignore[assignment]
+                if not sent_event:
+                    raise
+                yield _STREAM_ERROR_EVENT
+                return
+            request = None  # type: ignore[assignment]
+            yield _STREAM_DONE_EVENT
+        finally:
+            await stream.aclose()
+
+
+async def _prepend_event(
+    first_event: bytes,
+    stream: AsyncIterator[bytes],
+) -> AsyncIterator[bytes]:
+    try:
+        yield first_event
+        async for event in stream:
+            yield event
+    finally:
+        close = getattr(stream, "aclose", None)
+        if close is not None:
+            await close()
 
 
 def _authenticate_inference(

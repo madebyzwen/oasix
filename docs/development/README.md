@@ -27,6 +27,7 @@ Vorgaben konkreten Implementierungsphasen zu und unterscheiden dabei zwischen:
 - [Phase B.2 – Wake-on-LAN und Bereitschaft](phases/B2-wake-readiness.md)
 - [Phase B.3.0 – Client-API-Authentifizierung](phases/B3-client-auth.md)
 - [Phase B.3.1 – Nicht streamender LLM-Proxy](phases/B3-llm-proxy.md)
+- [Phase B.4 – Streaming und Cancellation](phases/B4-streaming.md)
 - [Historischer B.3-Abhängigkeitsnachweis](phases/B3-llm-proxy-blocked.md)
 - [Phase C.1 – Persistenter Lease-Lifecycle](phases/C1-lease-lifecycle.md)
 - [Vorlage für zukünftige Phasen](templates/phase-template.md)
@@ -55,9 +56,10 @@ B.3.0 stellt das getrennte Client-API-Authentifizierungs- und
 Berechtigungsfundament bereit. B.3.1 implementiert darauf den nicht streamenden
 `POST /v1/chat/completions`-Pfad mit Authentifizierung, begrenzter Concurrency,
 persistenter Lease samt Heartbeat, Wake/Readiness und abgesichertem Upstream-
-Transport. B.3.1 bleibt bis zum unabhängigen Review unfreigegeben. Streaming
-und LLM-Telemetrie folgen in B.4 und B.5 und sind zu diesem Stand nicht
-implementiert.
+Transport. B.4 ergänzt darauf inkrementelle validierte SSE-Streams,
+Disconnect-Behandlung und explizites Cleanup aller verschachtelten Ressourcen.
+B.3.1 und B.4 bleiben bis zu ihren unabhängigen Reviews unfreigegeben. LLM-
+Telemetrie folgt in B.5 und ist zu diesem Stand nicht implementiert.
 
 ## Pflegeregeln
 

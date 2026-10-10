@@ -90,3 +90,36 @@ class ChatCompletionResponse(_ApiModel):
     @classmethod
     def accept_json_array(cls, value: object) -> object:
         return tuple(value) if type(value) is list else value
+
+
+class ChatCompletionDelta(_ApiModel):
+    role: Literal["assistant"] | None = None
+    content: MessageContent | None = None
+
+
+class ChatCompletionChunkChoice(_ApiModel):
+    index: Annotated[StrictInt, Field(ge=0)]
+    delta: ChatCompletionDelta
+    finish_reason: FinishReason | None
+
+    @model_validator(mode="after")
+    def require_delta_or_finish(self) -> ChatCompletionChunkChoice:
+        if self.delta.role is None and self.delta.content is None and self.finish_reason is None:
+            raise ValueError("stream choice must contain a delta or finish reason")
+        return self
+
+
+class ChatCompletionChunk(_ApiModel):
+    """Validated OpenAI-compatible streaming chunk subset."""
+
+    id: Annotated[StrictStr, StringConstraints(min_length=1, max_length=255)]
+    object: Literal["chat.completion.chunk"]
+    created: Annotated[StrictInt, Field(ge=0)]
+    model: ModelIdentifier
+    choices: Annotated[tuple[ChatCompletionChunkChoice, ...], Field(min_length=1, max_length=128)]
+    system_fingerprint: Annotated[StrictStr, StringConstraints(max_length=255)] | None = None
+
+    @field_validator("choices", mode="before")
+    @classmethod
+    def accept_json_array(cls, value: object) -> object:
+        return tuple(value) if type(value) is list else value

@@ -246,7 +246,7 @@ def test_runtime_schema_two_cannot_create_gateway(
         create_llm_gateway_app(runtime, ResolvedSecrets({}), migrated_database)
 
 
-def test_rejects_streaming_until_phase_b4_and_duplicate_json_keys(
+def test_rejects_duplicate_json_keys(
     gateway_config_data: dict[str, Any],
     write_config: Any,
     secret_directory: Path,
@@ -254,7 +254,7 @@ def test_rejects_streaming_until_phase_b4_and_duplicate_json_keys(
 ) -> None:
     loaded = _loaded(gateway_config_data, write_config, secret_directory)
 
-    async def run() -> tuple[httpx.Response, httpx.Response]:
+    async def run() -> httpx.Response:
         app = _app(
             loaded,
             migrated_database,
@@ -266,12 +266,7 @@ def test_rejects_streaming_until_phase_b4_and_duplicate_json_keys(
                 base_url="http://control-plane.example.invalid",
             ) as client:
                 headers = {"Authorization": f"Bearer {CLIENT_KEY}"}
-                streaming = await client.post(
-                    "/v1/chat/completions",
-                    headers=headers,
-                    json=_request_payload(stream=True),
-                )
-                duplicate = await client.post(
+                return await client.post(
                     "/v1/chat/completions",
                     headers=headers,
                     content=(
@@ -279,12 +274,10 @@ def test_rejects_streaming_until_phase_b4_and_duplicate_json_keys(
                         b'"messages":[{"role":"user","content":"x"}]}'
                     ),
                 )
-                return streaming, duplicate
         finally:
             await app.state.oasix_resources.aclose()
 
-    streaming, duplicate = asyncio.run(run())
-    assert streaming.status_code == 400
+    duplicate = asyncio.run(run())
     assert duplicate.status_code == 400
 
 

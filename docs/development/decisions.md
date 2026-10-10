@@ -604,3 +604,38 @@ ausdrücklich noch nicht implementierte Entscheidungen.
   AC-10; [Phase B.3.1](phases/B3-llm-proxy.md),
   [Gateway](../../src/oasix/llm/gateway.py),
   [Lease-Adapter](../../src/oasix/llm/leases.py)
+
+## OASIX-DEC-022 – Inkrementelles SSE-Streaming mit explizitem Cleanup
+
+- **Status:** In B.4 implementiert; unabhängige Review-Abnahme ausstehend
+- **Kontext:** Ein Streaming-Request nutzt den Worker noch nach Rückgabe des
+  HTTP-Response-Objekts aus der Route. Admission, Lease, Heartbeat und
+  Upstream dürfen deshalb weder an den Route-Return noch an einen einzelnen
+  Chunk gekoppelt werden. Client-Disconnect und späte Upstream- oder
+  Cleanup-Fehler müssen alle Ressourcen deterministisch beenden.
+- **Gewählte Lösung:** Die B.3.1-Admission wird als explizites Token an eine
+  verwaltete Streaming-Antwort übertragen. Vier geschachtelte Ebenen schließen
+  jeweils ihren direkten Async-Iterator beziehungsweise die HTTPX-Response.
+  Der Upstream wird inkrementell als SSE gelesen; Ereignisse, Gesamtgröße,
+  Laufzeit und ein geschlossenes Chat-Completion-Chunk-Schema sind begrenzt.
+  Sein `[DONE]` wird erst nach erfolgreichem Upstream-Ende und Lease-Release als
+  neuer finaler Marker an den Client gesendet. Ein später Fehler erzeugt ein
+  statisches SSE-Fehlerobjekt und keinen Erfolgsmarker.
+- **Begründung:** Python schließt bei einem abgebrochenen `async for`
+  verschachtelte Async-Generatoren nicht in allen Suspendierungszuständen
+  automatisch. Explizites `aclose()` auf jeder Eigentumsgrenze verhindert
+  weiterlaufende Upstreams, Heartbeats oder belegte Admission-Slots. Der
+  verzögerte Erfolgsmarker macht insbesondere Release-Fehler sichtbar.
+- **Berücksichtigte Alternativen:** Vollständiges Puffern, Freigabe der Lease
+  nach Route-Return, unkontrolliertes Durchreichen beliebiger Provider-SSE,
+  `[DONE]` vor Cleanup und unüberwachte Hintergrundaufgaben wurden
+  ausgeschlossen.
+- **Konsequenzen und Trade-offs:** Nach gesendeten HTTP-200-Headern kann ein
+  später Fehler nur innerhalb des SSE-Protokolls signalisiert werden. Harte
+  Limits von 1 MiB je Ereignis und 64 MiB insgesamt können sehr große legitime
+  Streams beenden. Offene providerabhängige Chunk-Erweiterungen sind nicht Teil
+  der unterstützten Teilmenge.
+- **Quellen:** Requirement LSE-01 bis LSE-03, SEC-03, OBS-01 und AC-03 bis
+  AC-10; [Phase B.4](phases/B4-streaming.md),
+  [Gateway](../../src/oasix/llm/gateway.py),
+  [LLM-Transport](../../src/oasix/llm/transport.py)

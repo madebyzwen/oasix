@@ -230,13 +230,15 @@ Sektion und besitzt keine privilegierten Defaults.
 
 Runtime-`schema_version: 4` ergänzt die für den produktiven LLM-Pfad
 erforderlichen Request-, Lease- und Heartbeat-Zeitparameter. Das Gateway stellt
-derzeit genau `POST /v1/chat/completions` als geschlossene, nicht streamende
-OpenAI-kompatible Teilmenge bereit. Es authentifiziert und autorisiert vor jeder
-Nutzung, weist Überlast ohne Warteschlange ab, hält über Wake, Readiness und den
-gesamten Upstream-Aufruf eine persistente Lease und setzt ausschließlich die
-konfigurierte Provider-Authentifizierung. Request- und Response-Größen sowie
-Timeouts sind begrenzt; Redirects und Umgebungs-Proxies sind deaktiviert.
-Streaming und LLM-Telemetrie folgen in B.4 beziehungsweise B.5.
+derzeit genau `POST /v1/chat/completions` als geschlossene OpenAI-kompatible
+Teilmenge für nicht streamende und SSE-streamende Chat Completions bereit. Es
+authentifiziert und autorisiert vor jeder Nutzung, weist Überlast ohne
+Warteschlange ab, hält über Wake, Readiness und den gesamten Upstream-Aufruf
+eine persistente Lease und setzt ausschließlich die konfigurierte Provider-
+Authentifizierung. Request-, Response- und Stream-Größen sowie Timeouts sind
+begrenzt; Redirects und Umgebungs-Proxies sind deaktiviert. Bei Disconnect
+werden Upstream, Heartbeat, Lease und Admission explizit geschlossen. LLM-
+Telemetrie folgt in B.5.
 
 ## SQLite-Persistenzfundament
 

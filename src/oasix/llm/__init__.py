@@ -23,14 +23,25 @@ from oasix.llm.leases import (
     InferenceLeaseSession,
     PersistentInferenceLeaseRegistry,
 )
-from oasix.llm.models import ChatCompletionRequest, ChatCompletionResponse
-from oasix.llm.service import InferenceConcurrencyGate, LlmProxyService
-from oasix.llm.transport import MAX_UPSTREAM_RESPONSE_BYTES, HttpLlmUpstream
+from oasix.llm.models import (
+    ChatCompletionChunk,
+    ChatCompletionRequest,
+    ChatCompletionResponse,
+)
+from oasix.llm.service import InferenceAdmission, InferenceConcurrencyGate, LlmProxyService
+from oasix.llm.transport import (
+    MAX_STREAM_EVENT_BYTES,
+    MAX_STREAM_RESPONSE_BYTES,
+    MAX_UPSTREAM_RESPONSE_BYTES,
+    HttpLlmUpstream,
+)
 
 __all__ = [
+    "ChatCompletionChunk",
     "ChatCompletionRequest",
     "ChatCompletionResponse",
     "HttpLlmUpstream",
+    "InferenceAdmission",
     "InferenceConcurrencyGate",
     "InferenceLeaseAcquireError",
     "InferenceLeaseRegistry",
@@ -47,6 +58,8 @@ __all__ = [
     "LlmUpstreamProtocolError",
     "LlmUpstreamTimeoutError",
     "MAX_CLIENT_REQUEST_BYTES",
+    "MAX_STREAM_EVENT_BYTES",
+    "MAX_STREAM_RESPONSE_BYTES",
     "MAX_UPSTREAM_RESPONSE_BYTES",
     "PersistentInferenceLeaseRegistry",
     "create_configured_llm_gateway_app",

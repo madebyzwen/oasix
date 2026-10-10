@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
 from typing import Protocol
 
 from oasix.llm.errors import (
@@ -26,6 +25,35 @@ class ReadinessController(Protocol):
 class NonStreamingUpstream(Protocol):
     async def complete(self, request: ChatCompletionRequest) -> ChatCompletionResponse: ...
 
+    def stream(self, request: ChatCompletionRequest) -> AsyncIterator[bytes]: ...
+
+
+class InferenceAdmission:
+    """One immediately reserved concurrency token with idempotent release."""
+
+    __slots__ = ("_closed", "_gate", "_token")
+
+    def __init__(self, gate: InferenceConcurrencyGate, token: object) -> None:
+        self._gate = gate
+        self._token = token
+        self._closed = False
+
+    async def __aenter__(self) -> InferenceAdmission:
+        if self._closed:
+            raise InferenceOverloadedError from None
+        return self
+
+    async def __aexit__(self, *_exception: object) -> None:
+        self.close()
+
+    def close(self) -> None:
+        if not self._closed:
+            self._gate._release(self._token)
+            self._closed = True
+
+    def belongs_to(self, gate: InferenceConcurrencyGate) -> bool:
+        return self._gate is gate and not self._closed
+
 
 class InferenceConcurrencyGate:
     """A bounded token pool with immediate overload rejection and no wait queue."""
@@ -37,16 +65,15 @@ class InferenceConcurrencyGate:
         for _ in range(limit):
             self._tokens.put_nowait(object())
 
-    @asynccontextmanager
-    async def slot(self) -> AsyncIterator[None]:
+    def acquire(self) -> InferenceAdmission:
         try:
             token = self._tokens.get_nowait()
         except asyncio.QueueEmpty:
             raise InferenceOverloadedError from None
-        try:
-            yield
-        finally:
-            self._tokens.put_nowait(token)
+        return InferenceAdmission(self, token)
+
+    def _release(self, token: object) -> None:
+        self._tokens.put_nowait(token)
 
 
 class LlmProxyService:
@@ -87,15 +114,13 @@ class LlmProxyService:
     async def complete(self, request: ChatCompletionRequest) -> ChatCompletionResponse:
         """Admit and run one request, replacing content-retaining tracebacks."""
 
-        async with self.admission():
+        async with self.admit():
             return await self.complete_admitted(request)
 
-    @asynccontextmanager
-    async def admission(self) -> AsyncIterator[None]:
+    def admit(self) -> InferenceAdmission:
         """Reserve capacity immediately, without introducing a waiting queue."""
 
-        async with self._gate.slot():
-            yield
+        return self._gate.acquire()
 
     async def complete_admitted(self, request: ChatCompletionRequest) -> ChatCompletionResponse:
         """Run an already-admitted request and replace sensitive tracebacks."""
@@ -129,3 +154,48 @@ class LlmProxyService:
             response = await self._upstream.complete(request)
             lease.ensure_healthy()
             return response
+
+    async def stream_admitted(
+        self,
+        request: ChatCompletionRequest,
+        admission: InferenceAdmission,
+    ) -> AsyncIterator[bytes]:
+        """Stream one admitted request while owning its persistent lease."""
+
+        if not admission.belongs_to(self._gate):
+            raise InferenceOverloadedError from None
+
+        error_type: type[LlmPathError] | None = None
+        try:
+            async with InferenceLeaseSession(
+                self._lease_registry,
+                self._worker_id,
+                self._lease_ttl,
+                self._heartbeat_interval,
+            ) as lease:
+                await self._readiness.ensure_ready((self._service_id,))
+                lease.ensure_healthy()
+                upstream_stream = self._upstream.stream(request)
+                try:
+                    async for event in upstream_stream:
+                        lease.ensure_healthy()
+                        yield event
+                finally:
+                    close = getattr(upstream_stream, "aclose", None)
+                    if close is not None:
+                        await close()
+                lease.ensure_healthy()
+            return
+        except asyncio.CancelledError:
+            request = None  # type: ignore[assignment]
+            raise asyncio.CancelledError from None
+        except LlmPathError as error:
+            error_type = type(error)
+        except WorkerInteractionError:
+            error_type = LlmReadinessError
+        except Exception:
+            error_type = LlmUpstreamError
+        request = None  # type: ignore[assignment]
+        if error_type is None:  # pragma: no cover - every exception path assigns it
+            raise AssertionError("LLM stream error mapping produced no category")
+        raise error_type from None
