@@ -1,6 +1,6 @@
 # Phase B.4 – Streaming und Cancellation
 
-Status: implementiert, unabhängige Review-Abnahme ausstehend
+Status: abgeschlossen, unabhängig geprüft und freigegeben
 
 ## 1. Ziel und Abgrenzung
 
@@ -112,9 +112,8 @@ Streaming-Dauer ab.
 
 ## 8. Abnahmestatus
 
-B.4 ist implementiert und lokal sowie unter Linux geprüft, bleibt aber bis zum
-unabhängigen GitHub-Code-Review unfreigegeben. B.5 ist inzwischen ebenfalls
-implementiert und wartet auf unabhängige Review-Abnahme.
+B.4 ist implementiert, lokal und unter Linux geprüft sowie unabhängig geprüft
+und freigegeben. B.5 ist ebenfalls unabhängig geprüft und freigegeben.
 
 ## 9. GitHub-Referenzen
 

@@ -1,6 +1,6 @@
 # Phase B.5 – LLM-Telemetrie und Integration
 
-Status: implementiert, unabhängige Review-Abnahme ausstehend
+Status: abgeschlossen, unabhängig geprüft und freigegeben
 
 ## 1. Ziel und Abgrenzung
 
@@ -86,7 +86,7 @@ dokumentiert.
 | B.5-fokussierte Suite | lokal, macOS, Python 3.12 | 88 bestanden | B.5-Arbeitsstand vor Commit |
 | Vollständige pytest-Suite | lokal, macOS, Python 3.12 | 358 bestanden | B.5-Arbeitsstand vor Commit |
 | Ruff, Paket-, Import-, Link- und Diff-Prüfung | lokal | bestanden | B.5-Arbeitsstand vor Commit |
-| Linux-CI | GitHub Actions, Ubuntu, Python 3.12 | nach Push ausstehend | [PR #6](https://github.com/madebyzwen/oasix/pull/6) |
+| Linux-CI | GitHub Actions, Ubuntu, Python 3.12 | bestanden | [Lauf `38008622994`](https://github.com/madebyzwen/oasix/actions/runs/38008622994) |
 
 Die Tests verwenden temporäre SQLite-Datenbanken, injizierte monotone Uhren,
 kontrollierte HTTP-Transporte und einen lokalen Wake-Sender. Sie benötigen
@@ -113,9 +113,9 @@ Streaming.
 
 ## 8. Abnahmestatus
 
-B.5 ist implementiert und lokal vollständig geprüft. Linux-CI wird nach dem
-Abschluss-Commit ausgeführt. B.3.1, B.4 und B.5 bleiben bis zum unabhängigen
-GitHub-Code-Review unfreigegeben.
+B.5 ist implementiert, lokal und unter Linux geprüft sowie unabhängig geprüft
+und freigegeben. Damit sind B.3.1, B.4 und B.5 im dokumentierten Umfang
+abgeschlossen.
 
 ## 9. GitHub-Referenzen
 
@@ -124,4 +124,6 @@ GitHub-Code-Review unfreigegeben.
   [PR #6](https://github.com/madebyzwen/oasix/pull/6)
 - Pull Request: [PR #6](https://github.com/madebyzwen/oasix/pull/6), offen und
   nicht gemergt
-- Linux-CI: nach Push ausstehend
+- Implementierungs-Commit:
+  [`d9a17cb`](https://github.com/madebyzwen/oasix/commit/d9a17cb8487b6258624b8ea5ccbd694903320bfb)
+- Linux-CI: [Lauf `38008622994`](https://github.com/madebyzwen/oasix/actions/runs/38008622994), bestanden

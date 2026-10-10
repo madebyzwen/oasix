@@ -1,12 +1,12 @@
 # Phase B.3.0 – Client-API-Authentifizierung und Berechtigungsmodell
 
-Status: abgeschlossen und als Grundlage von B.3.1 freigegeben
+Status: abgeschlossen, unabhängig geprüft und freigegeben
 
 ## 1. Ziel und Abgrenzung
 
 B.3.0 implementiert einen transportneutralen, wiederverwendbaren Baustein für
-Bearer-Authentifizierung und explizite Berechtigungsprüfung zukünftiger
-Client- und Management-APIs. Mehrere generisch benannte Client-Identitäten und
+Bearer-Authentifizierung und explizite Berechtigungsprüfung für Client- und
+Management-APIs. Mehrere generisch benannte Client-Identitäten und
 überlappende Schlüssel für eine kontrollierte Rotation werden unterstützt.
 
 Nicht enthalten sind HTTP-Routen, OpenAI-Proxy, Streaming, Power-Endpunkte,
@@ -51,9 +51,9 @@ Administrationsrecht impliziert weder Inference noch künftige, nicht definierte
 Capabilities.
 
 Die Komponente hängt weder von einem Webframework noch von Netzwerk,
-Persistenz, Worker-Transport oder Logging ab. Das zukünftige Gateway muss den
-Header aus seinem Transport übernehmen, die Authentifizierung einmal ausführen
-und vor jeder Operation deren konkrete Capability prüfen.
+Persistenz, Worker-Transport oder Logging ab. Das in B.3.1 implementierte
+Gateway übernimmt den Header aus seinem Transport, führt die Authentifizierung
+einmal aus und prüft vor der Operation die konkrete Capability.
 
 ## 4. Entscheidungen
 
@@ -139,7 +139,7 @@ Betroffene Module:
 | Client-Authentifizierung und Autorisierung | lokal, macOS, Python 3.12 | 28 bestanden | `tests/test_client_auth.py` |
 | Vollständige pytest-Suite | lokal, macOS, Python 3.12 | 298 bestanden | `feature/b-llm-path` vor Commit |
 | Ruff, Paket-, Import-, Dokumentationslink- und Diff-Prüfung | lokal | bestanden | dieser Implementierungsauftrag |
-| Linux-CI | GitHub Actions, Ubuntu, Python 3.12 | nach Push ausstehend | [PR #6](https://github.com/madebyzwen/oasix/pull/6) |
+| Linux-CI | GitHub Actions, Ubuntu, Python 3.12 | bestanden | [Lauf `38005483797`](https://github.com/madebyzwen/oasix/actions/runs/38005483797) |
 
 Die Tests prüfen beide Capabilities, mehrere Clients, einheitliche
 Fehlergrenzen, fehlende und ungültige Header, doppelte Zuordnungen,
@@ -149,10 +149,9 @@ verwenden weder Netzwerk noch externe Identitätsanbieter.
 
 ## 7. Einschränkungen und Risiken
 
-- Die zukünftige HTTP-Schicht muss Header-Größen ebenfalls begrenzen und darf
-  Authorization-Werte niemals loggen. Mehrfach vorhandene Authorization-
-  Header muss sie als mehrdeutig abweisen, statt einen Wert auszuwählen.
-  B.3.0 stellt noch keine Middleware oder Route bereit.
+- B.3.0 stellt selbst keine Middleware oder Route bereit. Die in B.3.1
+  implementierte HTTP-Schicht begrenzt die Eingabe, loggt keine Authorization-
+  Werte und weist mehrfach vorhandene Authorization-Header als mehrdeutig ab.
 - Die Authentifizierungsprüfung ist pro Prozess lokal. Konfigurationsänderungen
   und Rotation werden erst nach einem kontrollierten Neustart wirksam.
 - Starke, zufällig erzeugte Schlüssel, restriktive Dateirechte und sichere
@@ -163,14 +162,14 @@ verwenden weder Netzwerk noch externe Identitätsanbieter.
   Python-Prozesses werden nicht als kryptografisch vollständig ausgeschlossen
   behauptet.
 - B.3.1 komponiert Authentifizierung, Concurrency-Gate, Lease, Wake/Readiness,
-  Upstream-Nutzung und die nicht streamenden Abbruch-/Fehlerpfade. Streaming-
-  spezifische Grenzen folgen in B.4.
+  Upstream-Nutzung und die nicht streamenden Abbruch-/Fehlerpfade. B.4 ergänzt
+  die streamingspezifischen Grenzen.
 
 ## 8. Abnahmestatus
 
-B.3.0 ist implementiert und als Grundlage des B.3.1-Gateways freigegeben.
-B.3.1 nutzt den Baustein produktiv; B.4 und B.5 sind zu diesem Stand nicht
-implementiert.
+B.3.0 ist implementiert, unabhängig geprüft und als Grundlage des
+B.3.1-Gateways freigegeben. B.3.1 nutzt den Baustein produktiv; B.4 und B.5
+sind ebenfalls implementiert, unabhängig geprüft und freigegeben.
 
 ## 9. GitHub-Referenzen
 
@@ -178,4 +177,4 @@ implementiert.
   in [PR #6](https://github.com/madebyzwen/oasix/pull/6)
 - Pull Request: [PR #6](https://github.com/madebyzwen/oasix/pull/6), offen und
   nicht gemergt
-- Linux-CI: nach Push ausstehend
+- Linux-CI: [Lauf `38005483797`](https://github.com/madebyzwen/oasix/actions/runs/38005483797), bestanden

@@ -105,7 +105,7 @@ und markiert nicht sauber beendete Attempts als `INTERRUPTED`. Nach einem
 Neustart werden Worker-Zustand, aktive Attempts und Leases mit der Realität
 abgeglichen. Retry- und Wake-up-Versuche sind begrenzt und konfigurierbar.
 
-## Geplante MVP-Phasen
+## MVP-Phasen
 
 | Phase | Ergebnis |
 | --- | --- |
@@ -237,8 +237,9 @@ Warteschlange ab, hält über Wake, Readiness und den gesamten Upstream-Aufruf
 eine persistente Lease und setzt ausschließlich die konfigurierte Provider-
 Authentifizierung. Request-, Response- und Stream-Größen sowie Timeouts sind
 begrenzt; Redirects und Umgebungs-Proxies sind deaktiviert. Bei Disconnect
-werden Upstream, Heartbeat, Lease und Admission explizit geschlossen. LLM-
-Telemetrie folgt in B.5.
+werden Upstream, Heartbeat, Lease und Admission explizit geschlossen. Die in
+B.5 ergänzte sichere Telemetrie erfasst verfügbare Wake-, Readiness-, Request-,
+First-Token- und Token-Metriken ohne Prompt- oder Antwortinhalte.
 
 ## SQLite-Persistenzfundament
 

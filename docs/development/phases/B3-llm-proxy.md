@@ -1,6 +1,6 @@
 # Phase B.3.1 – Authentifizierter, Lease-geschützter LLM-Proxy
 
-Status: implementiert, unabhängige Review-Abnahme ausstehend
+Status: abgeschlossen, unabhängig geprüft und freigegeben
 
 ## 1. Ziel und Abgrenzung
 
@@ -110,8 +110,8 @@ werden keine produktiven Hosts oder Secret-Dateien verwendet.
 
 ## 7. Einschränkungen und Risiken
 
-- B.3.1 ist bewusst nicht streamend; SSE und seine Abbruchsemantik folgen in
-  B.4.
+- B.3.1 ist bewusst nicht streamend; B.4 ergänzt darauf SSE und dessen
+  Abbruchsemantik.
 - Das Concurrency-Limit gilt pro Control-Plane-Prozess. Der SQLite-MVP und
   diese Implementierung setzen einen einzelnen Gateway-Prozess voraus; mehrere
   ASGI-Worker würden ein verteiltes Admission-Verfahren erfordern.
@@ -127,9 +127,9 @@ werden keine produktiven Hosts oder Secret-Dateien verwendet.
 
 ## 8. Abnahmestatus
 
-B.3.1 ist implementiert und lokal geprüft, aber bis zum unabhängigen
-GitHub-Code-Review nicht freigegeben. B.4 und B.5 sind inzwischen
-implementiert und warten ebenfalls auf unabhängige Review-Abnahme.
+B.3.1 ist implementiert, lokal und unter Linux geprüft sowie unabhängig
+geprüft und freigegeben. B.4 und B.5 sind ebenfalls unabhängig geprüft und
+freigegeben.
 
 ## 9. GitHub-Referenzen
 

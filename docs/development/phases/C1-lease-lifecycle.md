@@ -1,6 +1,6 @@
 # Phase C.1 – Persistenter Lease-Lifecycle
 
-Status: implementiert und unabhängig geprüft
+Status: abgeschlossen, unabhängig geprüft und freigegeben
 
 ## 1. Ziel und Abgrenzung
 
@@ -121,22 +121,22 @@ Es werden keine Worker, Netzwerkdienste oder realen Secret-Dateien benötigt.
 Reale Multi-Prozess-Last, Uhrensynchronisierung des Deployment-Hosts und
 langlaufender Produktionsbetrieb sind lokal nicht nachgewiesen.
 
-## 7. B.3-Abhängigkeiten und verbleibende Risiken
+## 7. Aufgelöste B.3-Abhängigkeiten und verbleibende Risiken
 
-C.1 erfüllt den in B.3 benannten persistenten Acquire-/Heartbeat-/Release-
-Lifecycle und bestätigt, dass die vorhandenen Lease-Spalten ohne Migration
-ausreichen. Der spätere B.3-Ablauf kann eine stabile Lease-ID vor Wake,
-Readiness und Upstream-Nutzung transaktional erwerben, während langer Nutzung
-erneuern und nach vollständigem Ende freigeben.
+C.1 erfüllt den ursprünglich in B.3 benannten persistenten Acquire-/Heartbeat-/
+Release-Lifecycle und bestätigt, dass die vorhandenen Lease-Spalten ohne
+Migration ausreichen. B.3.0 und B.3.1 haben die übrigen damaligen Blocker
+aufgelöst. Der freigegebene LLM-Pfad erwirbt eine stabile Lease-ID vor Wake,
+Readiness und Upstream-Nutzung, erneuert sie während langer Nutzung und gibt sie
+erst nach vollständigem Ende frei.
 
-B.3 bleibt vor seiner Implementierung dennoch blockiert:
+Die folgenden Abgrenzungen gelten weiterhin:
 
-- B.3.0 implementiert den externen Client-API-Schlüssel- und
-  Berechtigungsvertrag für `/v1/...`, bleibt aber bis zu dessen eigener
-  unabhängiger Review-Abnahme unfreigegeben.
-- Die Integration von Authentifizierung, Concurrency-Gate, Lease, Wake,
-  Readiness, Upstream-Streaming sowie Abbruch-/Fehlerpfaden ist nicht Teil von
-  C.1 und muss in B.3 atomar beziehungsweise kompensierend entworfen werden.
+- B.3.0 verantwortet den getrennten Client-API-Schlüssel- und
+  Berechtigungsvertrag für `/v1/...`.
+- B.3.1 und B.4 verantworten die Integration von Authentifizierung,
+  Concurrency-Gate, Lease, Wake, Readiness, Upstream-Streaming sowie Abbruch-
+  und Fehlerpfaden; diese Ablaufkomposition bleibt außerhalb von C.1.
 - Verwaiste aktive Leases laufen zuverlässig aus; ihre spätere markierende
   Bereinigung und der reale Worker-/Service-Abgleich bleiben Recovery-Arbeit.
 - SQLite kann konkurrierende Schreibvorgänge serialisieren. Nach Ablauf des
@@ -149,8 +149,9 @@ B.3 bleibt vor seiner Implementierung dennoch blockiert:
 
 C.1 ist implementiert, unabhängig geprüft und für seinen dokumentierten
 Lifecycle-Umfang freigegeben. Die Abnahme umfasst weder B.3-Ablaufkomposition
-noch Proxy, Streaming, Power- oder Recovery-Logik. B.3 wurde nicht begonnen
-und B.4/B.5 wurden nicht begonnen.
+noch Proxy, Streaming, Power- oder Recovery-Logik. Die ebenfalls freigegebenen
+B.3- bis B.5-Komponenten bauen auf C.1 auf, ohne dessen Verantwortungsgrenze zu
+erweitern.
 
 ## 9. GitHub-Referenzen
 

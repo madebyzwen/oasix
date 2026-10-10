@@ -1,6 +1,6 @@
 # Phase B.2 – Wake-on-LAN und Worker-Bereitschaft
 
-Status: abgeschlossen und unabhängig geprüft
+Status: abgeschlossen, unabhängig geprüft und freigegeben
 
 ## 1. Ziel und Abgrenzung
 

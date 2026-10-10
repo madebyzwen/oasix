@@ -1,6 +1,6 @@
 # Phase B.3 – Historischer Abhängigkeitsnachweis
 
-Status: Blocker durch C.1 und B.3.0 aufgelöst; B.3.1 implementiert
+Status: historischer Nachweis; Blocker aufgelöst und B.3 freigegeben
 
 ## 1. Ziel und Abgrenzung
 
@@ -75,8 +75,9 @@ Nachweise für Authentifizierung und Proxy stehen in
 ## 8. Abnahmestatus
 
 Der hier dokumentierte Blocker ist aufgelöst. Der aktuelle Implementierungs-
-und Abnahmestatus steht in [Phase B.3.1](B3-llm-proxy.md). B.4 und B.5 sind
-inzwischen ebenfalls implementiert und warten auf unabhängige Review-Abnahme.
+und Abnahmestatus steht in [Phase B.3.1](B3-llm-proxy.md). B.3.0, B.3.1, B.4
+und B.5 sind unabhängig geprüft und freigegeben. Dieses Dokument bleibt
+ausschließlich als Entwicklungshistorie erhalten.
 
 ## 9. GitHub-Referenzen
 

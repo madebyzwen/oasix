@@ -29,6 +29,7 @@ Vorgaben konkreten Implementierungsphasen zu und unterscheiden dabei zwischen:
 - [Phase B.3.1 – Nicht streamender LLM-Proxy](phases/B3-llm-proxy.md)
 - [Phase B.4 – Streaming und Cancellation](phases/B4-streaming.md)
 - [Phase B.5 – LLM-Telemetrie und Integration](phases/B5-telemetry-integration.md)
+- [Abschluss Phase B](phases/B-phase-completion.md)
 - [Historischer B.3-Abhängigkeitsnachweis](phases/B3-llm-proxy-blocked.md)
 - [Phase C.1 – Persistenter Lease-Lifecycle](phases/C1-lease-lifecycle.md)
 - [Vorlage für zukünftige Phasen](templates/phase-template.md)
@@ -45,8 +46,11 @@ die generische, transportneutrale Worker-Vertragsgrenze mit
 konfigurationsgebundener Identität, Zustandsbeobachtung, servicebezogener
 Readiness und vorbereitenden Wake-/Sleep-Ports sowie ein geschlossenes
 JSON-Lines-Loggingfundament. Produktive Worker-Kommunikation, Power-Ausführung,
-operative Readiness und weitere Orchestrierungslogik bleiben späteren Phasen
-vorbehalten; Phase A des Requirements ist damit nicht insgesamt abgeschlossen.
+operative Readiness und weitere Orchestrierungslogik gehörten nicht zum
+A.3-Umfang. Phase B implementiert inzwischen HTTP-Readiness und Wake-on-LAN;
+Sleep, vollständige Worker-Zustandsführung und weitere Orchestrierung bleiben
+späteren Phasen vorbehalten. Phase A des Requirements ist damit nicht insgesamt
+abgeschlossen.
 
 B.1 implementiert den produktiven asynchronen HTTP-Readiness-Adapter, B.2 die
 konfigurierte Wake-on-LAN-Ausführung und eine begrenzte servicebezogene
@@ -60,8 +64,12 @@ persistenter Lease samt Heartbeat, Wake/Readiness und abgesichertem Upstream-
 Transport. B.4 ergänzt darauf inkrementelle validierte SSE-Streams,
 Disconnect-Behandlung und explizites Cleanup aller verschachtelten Ressourcen.
 B.5 ergänzt sichere korrelierte LLM-Telemetrie und die übergreifenden
-Integrationsnachweise. B.3.1, B.4 und B.5 sind implementiert, bleiben aber bis
-zu ihren unabhängigen Reviews unfreigegeben.
+Integrationsnachweise. B.1 bis B.5 sind im dokumentierten Umfang implementiert,
+unabhängig geprüft und freigegeben; der zusammenfassende Nachweis steht im
+[Abschlussdokument Phase B](phases/B-phase-completion.md). C.1 wurde als
+notwendige Lease-Grundlage vorgezogen und ist ebenfalls unabhängig geprüft und
+freigegeben. Echte Hardware-, Netzwerk- und LLM-Dienste wurden durch die
+automatisierten Testtransporte ausdrücklich nicht verifiziert.
 
 ## Pflegeregeln
 

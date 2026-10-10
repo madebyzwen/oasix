@@ -422,7 +422,7 @@ ausdrücklich noch nicht implementierte Entscheidungen.
 
 ## OASIX-DEC-017 – Isolierter asynchroner HTTP-Readiness-Adapter
 
-- **Status:** In B.1 implementiert und unabhängig geprüft
+- **Status:** In B.1 implementiert, unabhängig geprüft und freigegeben
 - **Kontext:** Service-Readiness muss asynchron, servicebezogen und anhand der
   extern validierten Worker-Konfiguration geprüft werden. Authentifizierung darf
   nur aus aufgelösten Secret-Referenzen stammen; Redirects, Prozess-Proxies und
@@ -452,7 +452,7 @@ ausdrücklich noch nicht implementierte Entscheidungen.
 
 ## OASIX-DEC-018 – Begrenzte Wake- und Readiness-Orchestrierung ohne State-Automat
 
-- **Status:** In B.2 implementiert und unabhängig geprüft
+- **Status:** In B.2 implementiert, unabhängig geprüft und freigegeben
 - **Kontext:** Ein Wake-on-LAN-Paket bestätigt nur die Übergabe eines
   Netzwerkdatagramms. Tatsächliche Bereitschaft darf erst nach erfolgreichen
   servicebezogenen Probes angenommen werden. v3.4 verlangt begrenzte Versuche,
@@ -483,7 +483,7 @@ ausdrücklich noch nicht implementierte Entscheidungen.
 
 ## OASIX-DEC-019 – Persistenter idempotenter Lease-Lifecycle
 
-- **Status:** In C.1 implementiert und unabhängig geprüft
+- **Status:** In C.1 implementiert, unabhängig geprüft und freigegeben
 - **Kontext:** Jede aktive Worker-Nutzung benötigt nach LSE-01 bis LSE-03 eine
   persistente Lease. Das A.2-Schema enthält alle erforderlichen Spalten, hatte
   aber noch keinen fachlichen Vertrag für Acquire, Heartbeat/Renew, Release,
@@ -527,7 +527,8 @@ ausdrücklich noch nicht implementierte Entscheidungen.
 
 ## OASIX-DEC-020 – Additives Runtime-Schema 3 und Client-API-Authentifizierung
 
-- **Status:** In B.3.0 implementiert; in B.3.1 produktiv eingebunden
+- **Status:** In B.3.0 implementiert, unabhängig geprüft und freigegeben; in
+  B.3.1 produktiv eingebunden
 - **Kontext:** SEC-01 verlangt Authentifizierung für Client- und Management-
   APIs sowie die Trennung unprivilegierter Inference-Nutzung von
   administrativen Power-Operationen. Runtime-Version 2 kennt ausschließlich
@@ -571,7 +572,7 @@ ausdrücklich noch nicht implementierte Entscheidungen.
 
 ## OASIX-DEC-021 – Lease-geschützter LLM-Gateway-Pfad
 
-- **Status:** In B.3.1 implementiert; unabhängige Review-Abnahme ausstehend
+- **Status:** In B.3.1 implementiert, unabhängig geprüft und freigegeben
 - **Kontext:** Der produktive LLM-Pfad muss Client-Authentifizierung,
   Concurrency, die autoritative persistente Lease, Wake/Readiness und den
   Provideraufruf so komponieren, dass keine Worker-Nutzung ungeschützt oder
@@ -596,10 +597,10 @@ ausdrücklich noch nicht implementierte Entscheidungen.
   Schreibtransaktion, Weitergabe von Client-Credentials, automatische
   Redirects und ungeprüfte offene OpenAI-Payloads wurden ausgeschlossen.
 - **Konsequenzen und Trade-offs:** B.3.1 unterstützt genau einen aktivierten,
-  frei benannten Service mit `kind: llm` und zunächst nur nicht streamende
+  frei benannten Service mit `kind: llm` und für sich nur nicht streamende
   Chat Completions. Das Concurrency-Limit gilt pro Prozess; der SQLite-MVP
-  setzt daher einen Gateway-Prozess voraus. Streaming und dessen vollständige
-  Cancellation-Semantik folgen in B.4, sichere operative Telemetrie in B.5.
+  setzt daher einen Gateway-Prozess voraus. B.4 ergänzt Streaming samt
+  Cancellation-Semantik, B.5 die sichere operative Telemetrie.
 - **Quellen:** Requirement SEC-01 bis SEC-03, LSE-01 bis LSE-03, AC-03 und
   AC-10; [Phase B.3.1](phases/B3-llm-proxy.md),
   [Gateway](../../src/oasix/llm/gateway.py),
@@ -607,7 +608,7 @@ ausdrücklich noch nicht implementierte Entscheidungen.
 
 ## OASIX-DEC-022 – Inkrementelles SSE-Streaming mit explizitem Cleanup
 
-- **Status:** In B.4 implementiert; unabhängige Review-Abnahme ausstehend
+- **Status:** In B.4 implementiert, unabhängig geprüft und freigegeben
 - **Kontext:** Ein Streaming-Request nutzt den Worker noch nach Rückgabe des
   HTTP-Response-Objekts aus der Route. Admission, Lease, Heartbeat und
   Upstream dürfen deshalb weder an den Route-Return noch an einen einzelnen
@@ -642,7 +643,7 @@ ausdrücklich noch nicht implementierte Entscheidungen.
 
 ## OASIX-DEC-023 – Geschlossene LLM-Request-Telemetrie
 
-- **Status:** In B.5 implementiert; unabhängige Review-Abnahme ausstehend
+- **Status:** In B.5 implementiert, unabhängig geprüft und freigegeben
 - **Kontext:** Der interaktive LLM-Pfad benötigt korrelierbare Wake-,
   Readiness-, Request-, First-Token- und Token-Metriken, darf aber keine
   Prompts, Antworten, Credentials, Endpunkte oder beliebige Exceptiondaten in

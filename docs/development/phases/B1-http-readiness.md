@@ -1,6 +1,6 @@
 # Phase B.1 – HTTP-Service-Readiness
 
-Status: abgeschlossen und unabhängig geprüft
+Status: abgeschlossen, unabhängig geprüft und freigegeben
 
 ## 1. Ziel und Abgrenzung
 
